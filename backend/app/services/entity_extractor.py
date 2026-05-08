@@ -159,7 +159,7 @@ async def extract_entities_openrouter(text: str, model_id: str) -> ExtractionRes
             headers={
                 "Authorization": f"Bearer {settings.openrouter_api_key}",
                 "HTTP-Referer": "https://ib-pir-calculator.ru",
-                "X-Title": "ИС ПИР Калькулятор",
+                "X-Title": "IB PIR Calculator",
             },
         )
         resp.raise_for_status()

@@ -92,6 +92,8 @@ async def stream_extraction(
             yield _sse("done", {"calc_id": calc_db_id})
 
         except Exception as exc:
+            import traceback
+            traceback.print_exc()
             yield _sse("error", {"message": str(exc)})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
