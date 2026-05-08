@@ -149,39 +149,47 @@ export default function ProjectPage() {
         </div>
 
         {/* OpenRouter */}
-        {canCalculate && project.files.length > 0 && orModels.length > 0 && (
+        {canCalculate && project.files.length > 0 && (
           <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Анализ через OpenRouter</div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <select
-                value={orModel}
-                onChange={(e) => setOrModel(e.target.value)}
-                style={{ flex: 1, background: 'var(--bg-input)', border: 'var(--hairline)', borderRadius: 'var(--radius-md)', padding: '7px 10px', fontSize: 12, color: 'var(--fg-1)', fontFamily: 'var(--font-mono)' }}
-              >
-                {orModels.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!orModel || orCalculating || calculating}
-                onClick={() => handleCalculate(orModel)}
-              >
-                {orCalculating ? 'Запуск…' : 'Рассчитать'}
-              </Button>
-            </div>
-            {orModel && (() => {
-              const m = orModels.find((x) => x.id === orModel)
-              if (!m) return null
-              const prompt = m.pricing?.prompt ? `$${(parseFloat(m.pricing.prompt) * 1e6).toFixed(2)}/M` : ''
-              const ctx = m.context_length ? `${(m.context_length / 1000).toFixed(0)}K ctx` : ''
-              return (
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>
-                  {[m.id, ctx, prompt].filter(Boolean).join(' · ')}
+            {orModels.length === 0 ? (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-3)' }}>
+                Добавьте <code>OPENROUTER_API_KEY</code> в <code>.env</code> и перезапустите backend
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <select
+                    value={orModel}
+                    onChange={(e) => setOrModel(e.target.value)}
+                    style={{ flex: 1, background: 'var(--bg-input)', border: 'var(--hairline)', borderRadius: 'var(--radius-md)', padding: '7px 10px', fontSize: 12, color: 'var(--fg-1)', fontFamily: 'var(--font-mono)' }}
+                  >
+                    {orModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!orModel || orCalculating || calculating}
+                    onClick={() => handleCalculate(orModel)}
+                  >
+                    {orCalculating ? 'Запуск…' : 'Рассчитать'}
+                  </Button>
                 </div>
-              )
-            })()}
+                {orModel && (() => {
+                  const m = orModels.find((x) => x.id === orModel)
+                  if (!m) return null
+                  const prompt = m.pricing?.prompt ? `$${(parseFloat(m.pricing.prompt) * 1e6).toFixed(2)}/M` : ''
+                  const ctx = m.context_length ? `${(m.context_length / 1000).toFixed(0)}K ctx` : ''
+                  return (
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>
+                      {[m.id, ctx, prompt].filter(Boolean).join(' · ')}
+                    </div>
+                  )
+                })()}
+              </>
+            )}
           </div>
         )}
 
