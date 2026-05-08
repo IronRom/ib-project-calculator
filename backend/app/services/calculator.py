@@ -116,8 +116,7 @@ def _match_row(
         candidates.append((x_eff, note, rows_for_unit))
 
     if not candidates:
-        # No unit match at all — try raw value against all rows as last resort
-        candidates = [(x_value, "", all_rows)]
+        return None
 
     # Pass 1: exact range match
     for x_eff, note, rows in candidates:
@@ -145,21 +144,24 @@ def _match_row(
     return None
 
 
+_CODE_PREFIX = re.compile(r'^(сбцп|сбц|мрр)\s+', re.IGNORECASE)
+
+
+def _normalize_code(code: str) -> str:
+    return _CODE_PREFIX.sub('', code.strip()).lower()
+
+
 def _find_active_book(db: Session, sbts_code: str) -> Optional[ReferenceBook]:
+    """Find active book by code. Handles prefix variants on both sides (СБЦП/СБЦ/МРР)."""
     if not sbts_code:
         return None
-    book = (
-        db.query(ReferenceBook)
-        .filter(ReferenceBook.is_active == True, ReferenceBook.code == sbts_code)
-        .first()
-    )
-    if not book:
-        book = (
-            db.query(ReferenceBook)
-            .filter(ReferenceBook.is_active == True, ReferenceBook.code.ilike(f"%{sbts_code}%"))
-            .first()
-        )
-    return book
+    query_norm = _normalize_code(sbts_code)
+    for book in db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all():
+        if book.code.strip().lower() == sbts_code.strip().lower():
+            return book  # exact
+        if _normalize_code(book.code) == query_norm:
+            return book  # prefix-normalized
+    return None
 
 
 def _fmt_number(n: float) -> str:
@@ -295,4 +297,5 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         "vat_amount":               vat_amount,
         "total_with_vat":           total_with_vat,
         "errors":                   errors,
+        "_price_index_id":          price_index.id if price_index else None,
     }

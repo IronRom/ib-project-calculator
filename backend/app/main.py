@@ -1,44 +1,21 @@
 import os
 import time
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, calculations, projects, admin_users, admin_references, admin_indices
+from app.api.auth import hash_password
 from app.config import settings
 from app.database import engine
 from app.models import Base, User
-from app.api.auth import hash_password
 
 _or_cache: dict = {"models": [], "fetched_at": 0.0}
 
-app = FastAPI(title="ИБ Калькулятор ПИР", version="0.1.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://frontend:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(auth.router)
-app.include_router(projects.router)
-app.include_router(calculations.router)
-app.include_router(admin_users.router)
-app.include_router(admin_references.router)
-app.include_router(admin_indices.router)
-
-
-@app.on_event("startup")
-def startup():
-    os.makedirs(settings.uploads_dir, exist_ok=True)
-    Base.metadata.create_all(bind=engine)
-    _ensure_admin()
-
-
-def _ensure_admin():
+def _ensure_admin() -> None:
     from sqlalchemy.orm import Session
     from app.database import SessionLocal
 
@@ -55,6 +32,32 @@ def _ensure_admin():
             db.commit()
     finally:
         db.close()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    os.makedirs(settings.uploads_dir, exist_ok=True)
+    Base.metadata.create_all(bind=engine)
+    _ensure_admin()
+    yield
+
+
+app = FastAPI(title="ИБ Калькулятор ПИР", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://frontend:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth.router)
+app.include_router(projects.router)
+app.include_router(calculations.router)
+app.include_router(admin_users.router)
+app.include_router(admin_references.router)
+app.include_router(admin_indices.router)
 
 
 @app.get("/health")

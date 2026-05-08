@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     admin_email: str = "admin@localhost"
     admin_password: str = "Admin12345!"
     uploads_dir: str = "/app/uploads"
+    extraction_model: str = "claude-sonnet-4-6"
+    max_tz_chars: int = 50_000
 
     class Config:
         env_file = ".env"

@@ -145,16 +145,15 @@ async def extract_entities_openrouter(text: str, model_id: str) -> ExtractionRes
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": f"Проанализируй следующее техническое задание и извлеки все объекты:\n\n{text[:50000]}",
+                "content": (
+                    "Проанализируй следующее техническое задание и извлеки все объекты. "
+                    "Обязательно вызови функцию extract_pir_entities с результатами.\n\n"
+                    + text[: settings.max_tz_chars]
+                ),
             },
         ],
         "tools": [EXTRACTION_TOOL_OPENAI],
     }
-    payload["messages"][1]["content"] = (
-        "Проанализируй следующее техническое задание и извлеки все объекты. "
-        "Обязательно вызови функцию extract_pir_entities с результатами.\n\n"
-        + text[:50000]
-    )
 
     async with httpx.AsyncClient(timeout=180) as client:
         resp = await client.post(
@@ -191,7 +190,7 @@ async def extract_entities(text: str) -> ExtractionResult:
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
     response = client.messages.create(
-        model="claude-sonnet-4-6",
+        model=settings.extraction_model,
         max_tokens=4096,
         system=[
             {
@@ -203,7 +202,10 @@ async def extract_entities(text: str) -> ExtractionResult:
         messages=[
             {
                 "role": "user",
-                "content": f"Проанализируй следующее техническое задание и извлеки все объекты:\n\n{text[:50000]}",
+                "content": (
+                    "Проанализируй следующее техническое задание и извлеки все объекты:\n\n"
+                    + text[: settings.max_tz_chars]
+                ),
             }
         ],
         tools=[EXTRACTION_TOOL],

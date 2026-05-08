@@ -1,6 +1,5 @@
 import asyncio
 import io
-import json
 import os
 import shutil
 import uuid
@@ -11,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
+from app.api.utils import sse as _sse
 from app.config import settings
 from app.database import get_db
 from app.models import AuditLog, ReferenceBook, ReferenceRow, User
@@ -203,10 +203,7 @@ async def parse_reference(
     book_id_val = book.id
     book_code = book.code
 
-    def _sse(event: str, data: dict) -> str:
-        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-    async def stream() -> AsyncGenerator[str, None]:
+    async def stream() -> AsyncGenerator[bytes, None]:
         from app.database import SessionLocal
         from app.models import ReferenceRow
         from app.services.reference_parser import parse_reference_pdf

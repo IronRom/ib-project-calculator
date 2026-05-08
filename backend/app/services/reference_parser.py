@@ -1,6 +1,7 @@
 """Parse СБЦП/СБЦ PDF into reference_rows via Claude vision."""
 import base64
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Callable
@@ -8,6 +9,42 @@ from typing import Any, Callable
 import anthropic
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+_RANGE_ONLY = re.compile(r'^(до|свыше|от)\s+[\d,]', re.IGNORECASE)
+_STRIP_TRAILING_RANGE = re.compile(r'\s+(от|свыше)\s+[\d,].*$', re.IGNORECASE)
+# Values Claude sometimes returns instead of real data
+_NULL_LIKE = frozenset({'none', 'null', 'nan', '-', '—', '"', "'"})
+
+
+def _fix_continuation_descriptions(rows: list[dict]) -> list[dict]:
+    """Prepend parent type prefix to range-only descriptions (cross-page propagation)."""
+    type_prefix: dict[int, str] = {}  # table_num -> last known type name
+
+    for row in rows:
+        tnum = row.get('table_num')
+        desc = (row.get('description') or '').strip()
+        if not desc or tnum is None or desc.lower() in _NULL_LIKE:
+            continue
+
+        if _RANGE_ONLY.match(desc):
+            prefix = type_prefix.get(tnum)
+            if prefix:
+                x_unit = (row.get('x_unit') or '').strip()
+                # Skip ditto marks and null-like units; avoid duplicating units already in prefix
+                real_unit = x_unit if x_unit and x_unit.lower() not in _NULL_LIKE else ''
+                unit_suffix = f' {real_unit}' if real_unit and real_unit not in prefix else ''
+                row['description'] = f'{prefix} {desc}{unit_suffix}'.strip()
+        else:
+            # Strip trailing range to get the type-name prefix for subsequent rows.
+            # Only update if this is a genuinely different (non-null-like) description.
+            prefix = _STRIP_TRAILING_RANGE.sub('', desc).strip().rstrip(',:').strip()
+            if prefix and prefix.lower() not in _NULL_LIKE:
+                type_prefix[tnum] = prefix
+
+    return rows
+
 
 DEFAULT_PARSE_PROMPT = """Ты извлекаешь данные из страницы справочника базовых цен (СБЦП/СБЦ) на проектные или изыскательские работы.
 
@@ -22,8 +59,8 @@ DEFAULT_PARSE_PROMPT = """Ты извлекаешь данные из стран
   "official_name": "<официальное наименование документа если видно на этой странице, иначе null>",
   "rows": [
     {
-      "row_num": "п.1",
-      "description": "Полное описание позиции включая диапазон X",
+      "row_num": "п.6",
+      "description": "Полное описание позиции включая тип объекта и диапазон X",
       "x_min": <число или null>,
       "x_max": <число или null>,
       "x_unit": "тыс. м³/сут",
@@ -34,18 +71,45 @@ DEFAULT_PARSE_PROMPT = """Ты извлекаешь данные из стран
 }
 
 Правила:
-- Если на странице нет строк с числами a и b — верни "rows": []
-- x_min/x_max: извлекай из фраз "до X", "свыше X до Y", "от X до Y"
-  Пример: "свыше 100 до 200" → x_min=100, x_max=200
-  Пример: "до 70" → x_min=null, x_max=70
-  Пример: "свыше 2100" → x_min=2100, x_max=null
-- x_unit: единица измерения из колонки 3 (тыс. м³/сут, м³/ч, км, м, т/сут и т.д.)
-  Если единица повторяется (обозначена как ") — подставь предыдущую
-- a и b — числа из колонок 4 и 5. b может быть дробным (0,15 → 0.15)
-- row_num: "п.1", "п.2", ... по порядку в таблице
-- Запятые в числах заменяй на точки: 3 790 180 → 3790180, 17 130 → 17130
-- Если таблица продолжается со страницы — table_num равен номеру продолжающейся таблицы
-- Верни ТОЛЬКО JSON, без markdown и пояснений"""
+
+row_num — ОБЯЗАТЕЛЬНО берётся из колонки 1 таблицы PDF. Это число из документа.
+  Формат: "п." + число из колонки 1. Пример: столбец 1 показывает "6" → row_num="п.6".
+  НИКОГДА не нумеруй строки сам. Если таблица продолжается со страницы —
+  числа в колонке 1 продолжают ряд предыдущей страницы (например, начинаются с 11, 12, ...).
+
+x_min/x_max — извлекай из фраз "до X", "свыше X до Y", "от X до Y":
+  "свыше 100 до 200" → x_min=100, x_max=200
+  "до 70"            → x_min=null, x_max=70
+  "свыше 2100"       → x_min=2100, x_max=null
+
+x_unit — единица измерения из колонки 3 (тыс. м³/сут, м³/ч, км, м, т/сут, т/г., шт. и т.д.)
+  Если в колонке 3 стоит знак " или то же самое (диттометка "повторить") —
+  ОБЯЗАТЕЛЬНО подставь единицу из предыдущей строки той же таблицы.
+  НИКОГДА не возвращай символ " или пустую строку в поле x_unit — только реальную единицу.
+
+a и b — числа из колонок 4 и 5. b может быть дробным (0,15 → 0.15).
+  Запятые в числах заменяй на точки, пробелы убирай: 3 790 180 → 3790180.
+
+Если таблица продолжается со страницы — table_num равен номеру продолжающейся таблицы.
+Если на странице нет строк с числами a и b — верни "rows": [].
+
+ВАЖНО — поле description должно быть ПОЛНЫМ для каждой строки:
+В таблицах СБЦП часто бывают группы строк: первая строка содержит название типа объекта
+и первый диапазон, последующие строки — только диапазон ("свыше 100 до 200").
+Для КАЖДОЙ строки группы в поле description укажи ПОЛНОЕ описание с названием типа объекта.
+
+Пример таблицы в PDF:
+  6  "Сооружения мех. обезвоживания осадка, до 1 т/сут"       т/сут   450000  120000
+  7  "свыше 1 до 5"                                            "       680000  95000
+  8  "свыше 5 до 10"                                           "       910000  72000
+
+Правильный вывод:
+  {"row_num":"п.6","description":"Сооружения мех. обезвоживания осадка производительностью, т/сут: до 1","x_min":null,"x_max":1,"x_unit":"т/сут","a":450000,"b":120000}
+  {"row_num":"п.7","description":"Сооружения мех. обезвоживания осадка производительностью, т/сут: свыше 1 до 5","x_min":1,"x_max":5,"x_unit":"т/сут","a":680000,"b":95000}
+  {"row_num":"п.8","description":"Сооружения мех. обезвоживания осадка производительностью, т/сут: свыше 5 до 10","x_min":5,"x_max":10,"x_unit":"т/сут","a":910000,"b":72000}
+
+Никогда не возвращай в description только диапазон без названия типа объекта.
+Верни ТОЛЬКО JSON, без markdown и пояснений."""
 
 
 def parse_reference_pdf(
@@ -68,13 +132,13 @@ def parse_reference_pdf(
     all_rows: list[dict[str, Any]] = []
     current_table_num: int | None = None
     official_name: str | None = None
+    last_x_unit: str | None = None  # cross-page ditto-mark resolution
 
     for i, img in enumerate(images):
         page_num = i + 1
         if on_progress:
             on_progress(page_num, total, f"Страница {page_num}/{total}")
 
-        # Convert image to base64
         import io
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=85)
@@ -82,8 +146,8 @@ def parse_reference_pdf(
 
         try:
             resp = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=2048,
+                model=settings.extraction_model,
+                max_tokens=4096,
                 messages=[
                     {
                         "role": "user",
@@ -102,13 +166,17 @@ def parse_reference_pdf(
                 ],
             )
             raw = resp.content[0].text.strip()
-            # Strip markdown code fences if present
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
+            # Extract just the JSON object — Claude sometimes adds trailing text
+            start, end = raw.find("{"), raw.rfind("}")
+            if start != -1 and end != -1:
+                raw = raw[start : end + 1]
 
             data = json.loads(raw)
         except Exception:
-            continue  # skip unparseable pages
+            logger.exception("Failed to parse page %d/%d of %s", page_num, total, pdf_path)
+            continue
 
         if data.get("official_name") and not official_name:
             official_name = data["official_name"]
@@ -121,14 +189,28 @@ def parse_reference_pdf(
 
         for row in data.get("rows", []):
             try:
+                # Resolve x_unit: ditto marks → inherit from last real unit
+                raw_unit = (row.get("x_unit") or "")
+                raw_unit = raw_unit if isinstance(raw_unit, str) else ""
+                raw_unit = raw_unit.strip()
+                if raw_unit and raw_unit not in ('"', "'", '“', '”'):
+                    last_x_unit = raw_unit
+                    resolved_unit: str | None = raw_unit
+                else:
+                    resolved_unit = last_x_unit  # ditto: use previous
+
+                # Avoid storing "None" string from str(None)
+                raw_desc = row.get("description")
+                description = raw_desc.strip() if isinstance(raw_desc, str) else None
+
                 all_rows.append(
                     {
                         "table_num": current_table_num,
                         "row_num": str(row.get("row_num", "")).strip() or None,
-                        "description": str(row.get("description", "")).strip() or None,
+                        "description": description or None,
                         "x_min": float(row["x_min"]) if row.get("x_min") is not None else None,
                         "x_max": float(row["x_max"]) if row.get("x_max") is not None else None,
-                        "x_unit": str(row.get("x_unit", "")).strip() or None,
+                        "x_unit": resolved_unit,
                         "a": float(row["a"]),
                         "b": float(row["b"]) if row.get("b") is not None else None,
                         "notes": None,
@@ -137,4 +219,4 @@ def parse_reference_pdf(
             except (KeyError, TypeError, ValueError):
                 continue
 
-    return all_rows, official_name
+    return _fix_continuation_descriptions(all_rows), official_name

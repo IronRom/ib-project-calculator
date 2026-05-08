@@ -1,5 +1,4 @@
 import asyncio
-import json
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_calculate
+from app.api.utils import sse as _sse
 from app.database import get_db
 from app.models import Calculation, Project, User
 from app.schemas import CalculationOut
@@ -114,6 +114,7 @@ def compute_calculation(
     if not calc.extracted_entities:
         raise HTTPException(status_code=422, detail="Сначала запустите извлечение сущностей")
     result = calculate(calc.extracted_entities, db)
+    calc.price_index_id = result.pop("_price_index_id", None)
     calc.calculation_result = result
     db.commit()
     return result
@@ -191,11 +192,6 @@ def get_calculation(
     if not calc:
         raise HTTPException(status_code=404, detail="Расчёт не найден")
     return calc
-
-
-def _sse(event: str, data: dict) -> bytes:
-    text = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-    return text.encode("utf-8")
 
 
 def _get_own_project(project_id: int, user_id: int, db: Session) -> Project:
