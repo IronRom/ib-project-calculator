@@ -191,8 +191,9 @@ def get_calculation(
     return calc
 
 
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+def _sse(event: str, data: dict) -> bytes:
+    text = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+    return text.encode("utf-8")
 
 
 def _get_own_project(project_id: int, user_id: int, db: Session) -> Project:
