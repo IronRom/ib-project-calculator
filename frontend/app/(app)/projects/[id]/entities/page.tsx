@@ -116,30 +116,66 @@ export default function EntitiesPage() {
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
             AI не смог извлечь объекты из ТЗ.
           </div>
-        ) : (
-          <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-            <div style={{ padding: '14px 18px', borderBottom: 'var(--hairline)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>Объекты ПИР</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{entities.length} позиций</div>
+        ) : (() => {
+          const obvious = entities.filter(e => (e.confidence ?? 1) >= 0.7)
+          const suggested = entities.filter(e => (e.confidence ?? 1) < 0.7)
+          const colHeaders = ['Категория', 'Тип объекта', 'Наименование', 'Адрес', 'X (из ТЗ)', 'Ед.', 'X (таблица)', 'Уверенность']
+          const theadRow = (
+            <tr>
+              {colHeaders.map((h, i) => (
+                <th key={i} style={{ textAlign: 'left', padding: '10px 14px', fontSize: 11, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border-default)', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          )
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Obvious positions */}
+              <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+                <div style={{ padding: '14px 18px', borderBottom: 'var(--hairline)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>Объекты ПИР</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{obvious.length} позиций</div>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead style={{ background: 'var(--bg-raised)' }}>{theadRow}</thead>
+                    <tbody>
+                      {obvious.map((entity, i) => {
+                        const globalIdx = entities.indexOf(entity)
+                        return <EntityRow key={i} entity={entity} unitCheck={unitChecks[globalIdx]} isLast={i === obvious.length - 1} />
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* AI-suggested positions */}
+              {suggested.length > 0 && (
+                <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--warning-500)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+                  <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--warning-500)', background: 'var(--status-warning-bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--warning-400)' }}>Предложено AI — требует проверки</div>
+                      <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 2 }}>
+                        Позиции нормативно обязательны, но прямо не указаны в ТЗ
+                      </div>
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--warning-400)' }}>{suggested.length} позиций</div>
+                  </div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead style={{ background: 'var(--bg-raised)' }}>{theadRow}</thead>
+                      <tbody>
+                        {suggested.map((entity, i) => {
+                          const globalIdx = entities.indexOf(entity)
+                          return <EntityRow key={i} entity={entity} unitCheck={unitChecks[globalIdx]} isLast={i === suggested.length - 1} suggested />
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead style={{ background: 'var(--bg-raised)' }}>
-                  <tr>
-                    {['Категория', 'Тип объекта', 'Наименование', 'Адрес', 'X (из ТЗ)', 'Ед.', 'X (таблица)', 'Уверенность'].map((h, i) => (
-                      <th key={i} style={{ textAlign: 'left', padding: '10px 14px', fontSize: 11, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border-default)', whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {entities.map((entity, i) => (
-                    <EntityRow key={i} entity={entity} unitCheck={unitChecks[i]} isLast={i === entities.length - 1} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Рассчитать button below table */}
         {entities.length > 0 && (
@@ -243,9 +279,10 @@ function SummaryRow({ cols, label, value, bold, note }: { cols: number; label: s
   )
 }
 
-function EntityRow({ entity, unitCheck, isLast }: { entity: ExtractedEntity; unitCheck?: UnitCheckItem; isLast: boolean }) {
+function EntityRow({ entity, unitCheck, isLast, suggested }: { entity: ExtractedEntity; unitCheck?: UnitCheckItem; isLast: boolean; suggested?: boolean }) {
   const tone = CATEGORY_TONES[entity.category] || 'default'
   const label = CATEGORY_LABELS[entity.category] || entity.category
+  const rowBg = suggested ? 'var(--status-warning-bg)' : undefined
 
   let unitCell: React.ReactNode = <span style={{ color: 'var(--fg-4)', fontSize: 11 }}>—</span>
   if (unitCheck) {
@@ -256,7 +293,6 @@ function EntityRow({ entity, unitCheck, isLast }: { entity: ExtractedEntity; uni
         </span>
       )
     } else if (unitCheck.note) {
-      // conversion happened
       const xEff = unitCheck.x_effective?.toLocaleString('ru-RU', { maximumFractionDigits: 4 }) ?? ''
       unitCell = (
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: unitCheck.extrapolated ? 'var(--warning-400)' : 'var(--fg-3)' }}>
@@ -265,26 +301,34 @@ function EntityRow({ entity, unitCheck, isLast }: { entity: ExtractedEntity; uni
         </span>
       )
     } else {
-      // same unit, no conversion
       unitCell = <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--success-400)' }}>✓</span>
     }
   }
 
   return (
-    <tr style={{ borderBottom: isLast ? 'none' : 'var(--hairline)' }}>
-      <td style={{ padding: '12px 14px' }}><Chip tone={tone}>{label}</Chip></td>
-      <td style={{ padding: '12px 14px', fontWeight: 500 }}>{entity.object_type}</td>
-      <td style={{ padding: '12px 14px', color: 'var(--fg-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entity.object_name}</td>
-      <td style={{ padding: '12px 14px', color: 'var(--fg-3)', fontSize: 12, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entity.address || '—'}</td>
-      <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, textAlign: 'right' }}>
-        {entity.x_value != null ? entity.x_value.toLocaleString('ru-RU', { maximumFractionDigits: 4 }) : '—'}
-      </td>
-      <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{entity.x_unit || '—'}</td>
-      <td style={{ padding: '12px 14px' }}>{unitCell}</td>
-      <td style={{ padding: '12px 14px' }}>
-        <ConfidenceBadge value={entity.confidence ?? 0} small />
-      </td>
-    </tr>
+    <>
+      <tr style={{ borderBottom: (isLast && !entity.notes) ? 'none' : 'var(--hairline)', background: rowBg }}>
+        <td style={{ padding: '12px 14px' }}><Chip tone={tone}>{label}</Chip></td>
+        <td style={{ padding: '12px 14px', fontWeight: 500 }}>{entity.object_type}</td>
+        <td style={{ padding: '12px 14px', color: 'var(--fg-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entity.object_name}</td>
+        <td style={{ padding: '12px 14px', color: 'var(--fg-3)', fontSize: 12, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entity.address || '—'}</td>
+        <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, textAlign: 'right' }}>
+          {entity.x_value != null ? entity.x_value.toLocaleString('ru-RU', { maximumFractionDigits: 4 }) : '—'}
+        </td>
+        <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{entity.x_unit || '—'}</td>
+        <td style={{ padding: '12px 14px' }}>{unitCell}</td>
+        <td style={{ padding: '12px 14px' }}>
+          <ConfidenceBadge value={entity.confidence ?? 0} small />
+        </td>
+      </tr>
+      {entity.notes && (
+        <tr style={{ borderBottom: isLast ? 'none' : 'var(--hairline)', background: rowBg }}>
+          <td colSpan={8} style={{ padding: '4px 14px 10px 14px', fontSize: 12, color: 'var(--fg-3)', fontStyle: 'italic' }}>
+            {entity.notes}
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
