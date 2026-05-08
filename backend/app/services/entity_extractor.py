@@ -149,8 +149,13 @@ async def extract_entities_openrouter(text: str, model_id: str) -> ExtractionRes
             },
         ],
         "tools": [EXTRACTION_TOOL_OPENAI],
-        "tool_choice": {"type": "function", "function": {"name": "extract_pir_entities"}},
+        "tool_choice": "auto",
     }
+    payload["messages"][1]["content"] = (
+        "Проанализируй следующее техническое задание и извлеки все объекты. "
+        "Обязательно вызови функцию extract_pir_entities с результатами.\n\n"
+        + text[:50000]
+    )
 
     async with httpx.AsyncClient(timeout=180) as client:
         resp = await client.post(
@@ -175,7 +180,7 @@ async def extract_entities_openrouter(text: str, model_id: str) -> ExtractionRes
             entities=[],
             stage="П+Р",
             region="",
-            missing_data=[f"OpenRouter ({model_id}): не вернул tool_call"],
+            missing_data=[f"OpenRouter ({model_id}): не вернул tool_call — модель не поддерживает принудительный вызов инструмента"],
             overall_confidence=0.0,
         )
 
