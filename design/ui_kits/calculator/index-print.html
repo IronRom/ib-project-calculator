@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<title>Калькулятор ПИР · Print</title>
+<link rel="stylesheet" href="../../colors_and_type.css"/>
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .page {
+    width: 1440px;
+    height: 900px;
+    background: var(--bg-app);
+    color: var(--fg-1);
+    overflow: hidden;
+    position: relative;
+    page-break-after: always;
+    break-after: page;
+    display: flex;
+    flex-direction: column;
+  }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  .page-label {
+    position: absolute;
+    bottom: 12px;
+    right: 16px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--fg-3);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    z-index: 100;
+    background: rgba(5,8,13,0.8);
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+  }
+  .app-shell { display: flex; height: 100%; flex: 1; min-height: 0; }
+  .app-shell > main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  *:focus-visible { outline: none; }
+  @page { size: 1440px 900px; margin: 0; }
+  @media print {
+    html, body { background: #fff; }
+    .page { box-shadow: none; }
+  }
+  /* For on-screen review */
+  @media screen {
+    body { background: #2a3340; padding: 20px; display: flex; flex-direction: column; gap: 20px; align-items: center; }
+    .page { box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  }
+</style>
+</head>
+<body>
+
+<div class="page" id="page-landing"><div class="page-label">01 · Лендинг</div><div id="root-landing" style="flex:1; min-height:0; overflow:hidden;"></div></div>
+<div class="page" id="page-auth"><div class="page-label">02 · Регистрация</div><div id="root-auth" style="flex:1; min-height:0; overflow:hidden;"></div></div>
+<div class="page" id="page-dashboard"><div class="page-label">03 · Проекты</div><div id="root-dashboard" style="flex:1; min-height:0; overflow:hidden;"></div></div>
+<div class="page" id="page-upload"><div class="page-label">04 · Загрузка ТЗ</div><div id="root-upload" style="flex:1; min-height:0; overflow:hidden;"></div></div>
+<div class="page" id="page-review"><div class="page-label">05 · Согласование</div><div id="root-review" style="flex:1; min-height:0; overflow:hidden;"></div></div>
+<div class="page" id="page-result"><div class="page-label">06 · Результат</div><div id="root-result" style="flex:1; min-height:0; overflow:hidden;"></div></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="Icons.jsx"></script>
+<script type="text/babel" src="Primitives.jsx"></script>
+<script type="text/babel" src="Chrome.jsx"></script>
+<script type="text/babel" src="LandingScreen.jsx"></script>
+<script type="text/babel" src="AuthScreen.jsx"></script>
+<script type="text/babel" src="DashboardScreen.jsx"></script>
+<script type="text/babel" src="UploadScreen.jsx"></script>
+<script type="text/babel" src="ReviewScreen.jsx"></script>
+<script type="text/babel" src="ResultScreen.jsx"></script>
+
+<script type="text/babel">
+  const noop = () => {};
+
+  function AppShell({ route, children }) {
+    const titles = {
+      dashboard: { title: 'Проекты', breadcrumb: 'РАБОЧАЯ ОБЛАСТЬ' },
+      upload:    { title: 'Новый расчёт', breadcrumb: 'ПРОЕКТЫ · НОВЫЙ' },
+      review:    { title: 'Согласование позиций', breadcrumb: 'ПРОЕКТЫ · ЖК «СЕВЕРНЫЙ», КОРПУС 4' },
+      result:    { title: 'Результат расчёта', breadcrumb: 'ПРОЕКТЫ · ЖК «СЕВЕРНЫЙ», КОРПУС 4' },
+    };
+    return (
+      <div className="app-shell">
+        <window.Sidebar active={route === 'dashboard' ? 'projects' : 'new'} onNav={noop} onLogout={noop}/>
+        <main>
+          <window.Topbar
+            title={titles[route].title}
+            breadcrumb={titles[route].breadcrumb}
+            actions={route === 'dashboard' ? null : <window.Button variant="ghost" size="sm">← Все проекты</window.Button>}
+          />
+          {children}
+        </main>
+      </div>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root-landing')).render(
+    <window.LandingScreen onCTA={noop} onSignIn={noop}/>
+  );
+  ReactDOM.createRoot(document.getElementById('root-auth')).render(
+    <window.AuthScreen onSubmit={noop} onBack={noop}/>
+  );
+  ReactDOM.createRoot(document.getElementById('root-dashboard')).render(
+    <AppShell route="dashboard"><window.DashboardScreen onNew={noop} onOpen={noop}/></AppShell>
+  );
+  ReactDOM.createRoot(document.getElementById('root-upload')).render(
+    <AppShell route="upload"><window.UploadScreen onExtracted={noop}/></AppShell>
+  );
+  ReactDOM.createRoot(document.getElementById('root-review')).render(
+    <AppShell route="review"><window.ReviewScreen onCalculate={noop}/></AppShell>
+  );
+  ReactDOM.createRoot(document.getElementById('root-result')).render(
+    <AppShell route="result"><window.ResultScreen onBackToProjects={noop}/></AppShell>
+  );
+
+  // Auto-print after fonts + JSX ready
+  (async () => {
+    try { await document.fonts.ready; } catch (e) {}
+    setTimeout(() => window.print(), 800);
+  })();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,11 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+  <defs>
+    <pattern id="g" width="80" height="80" patternUnits="userSpaceOnUse">
+      <path d="M 80 0 L 0 0 0 80" fill="none" stroke="#161D27" stroke-width="1"></path>
+      <path d="M 16 0 V80 M 32 0 V80 M 48 0 V80 M 64 0 V80 M 0 16 H80 M 0 32 H80 M 0 48 H80 M 0 64 H80" fill="none" stroke="#0F141C" stroke-width="0.5"></path>
+    </pattern>
+  </defs>
+  <rect width="80" height="80" fill="#0A0E15"></rect>
+  <rect width="80" height="80" fill="url(#g)"></rect>
+</svg>

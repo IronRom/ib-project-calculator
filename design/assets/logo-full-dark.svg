@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64" fill="none">
+  
+  <g>
+    
+    <rect x="6" y="10" width="44" height="44" rx="2" stroke="#1F5FE8" stroke-width="1.5"></rect>
+    
+    <path d="M14 46 L42 18" stroke="#1F5FE8" stroke-width="2.5" stroke-linecap="square"></path>
+    
+    <rect x="11" y="43" width="6" height="6" fill="#22D3EE"></rect>
+    <rect x="39" y="15" width="6" height="6" fill="#22D3EE"></rect>
+    
+    <circle cx="28" cy="32" r="2.5" fill="#E8ECF1"></circle>
+  </g>
+  
+  <text x="64" y="30" font-family="&#39;IBM Plex Sans&#39;, system-ui, sans-serif" font-weight="600" font-size="16" letter-spacing="0.02em" fill="#E8ECF1">ИНТ. СТРОИТЕЛЬСТВО</text>
+  <text x="64" y="50" font-family="&#39;IBM Plex Mono&#39;, monospace" font-weight="500" font-size="13" letter-spacing="0.04em" fill="#5A8CF4">КАЛЬКУЛЯТОР · ПИР</text>
+</svg>

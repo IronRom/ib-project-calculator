@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Калькулятор ПИР · UI Kit</title>
+<link rel="stylesheet" href="../../colors_and_type.css"/>
+<link rel="icon" type="image/svg+xml" href="../../assets/mark.svg"/>
+<style>
+  html, body, #root { height: 100%; }
+  body { overflow: hidden; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg-app); }
+  ::-webkit-scrollbar-thumb { background: var(--ink-600); border-radius: 999px; border: 2px solid var(--bg-app); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--ink-500); }
+  *:focus-visible { outline: none; box-shadow: var(--shadow-focus); border-radius: var(--radius-sm); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="Icons.jsx"></script>
+<script type="text/babel" src="Primitives.jsx"></script>
+<script type="text/babel" src="Chrome.jsx"></script>
+<script type="text/babel" src="LandingScreen.jsx"></script>
+<script type="text/babel" src="AuthScreen.jsx"></script>
+<script type="text/babel" src="DashboardScreen.jsx"></script>
+<script type="text/babel" src="UploadScreen.jsx"></script>
+<script type="text/babel" src="ReviewScreen.jsx"></script>
+<script type="text/babel" src="ResultScreen.jsx"></script>
+
+<script type="text/babel">
+  function App() {
+    const [route, setRoute] = React.useState('landing');
+    // routes: landing | auth | dashboard | upload | review | result
+
+    const inApp = ['dashboard', 'upload', 'review', 'result'].includes(route);
+
+    const titles = {
+      dashboard: { title: 'Проекты', breadcrumb: 'РАБОЧАЯ ОБЛАСТЬ' },
+      upload:    { title: 'Новый расчёт', breadcrumb: 'ПРОЕКТЫ · НОВЫЙ' },
+      review:    { title: 'Согласование позиций', breadcrumb: 'ПРОЕКТЫ · ЖК «СЕВЕРНЫЙ», КОРПУС 4' },
+      result:    { title: 'Результат расчёта', breadcrumb: 'ПРОЕКТЫ · ЖК «СЕВЕРНЫЙ», КОРПУС 4' },
+    };
+
+    return (
+      <div data-screen-label={`Calculator · ${route}`} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {route === 'landing' && (
+          <window.LandingScreen onCTA={() => setRoute('auth')} onSignIn={() => setRoute('auth')}/>
+        )}
+        {route === 'auth' && (
+          <window.AuthScreen onSubmit={() => setRoute('dashboard')} onBack={() => setRoute('landing')}/>
+        )}
+        {inApp && (
+          <div style={{ height: '100%', display: 'flex' }}>
+            <window.Sidebar
+              active={route === 'dashboard' ? 'projects' : 'new'}
+              onNav={(id) => {
+                if (id === 'projects') setRoute('dashboard');
+                else if (id === 'new') setRoute('upload');
+              }}
+              onLogout={() => setRoute('landing')}
+            />
+            <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+              <window.Topbar
+                title={titles[route].title}
+                breadcrumb={titles[route].breadcrumb}
+                actions={
+                  route === 'dashboard' ? null : (
+                    <window.Button variant="ghost" size="sm" onClick={() => setRoute('dashboard')}>← Все проекты</window.Button>
+                  )
+                }
+              />
+              {route === 'dashboard' && <window.DashboardScreen onNew={() => setRoute('upload')} onOpen={() => setRoute('result')}/>}
+              {route === 'upload' && <window.UploadScreen onExtracted={() => setRoute('review')}/>}
+              {route === 'review' && <window.ReviewScreen onCalculate={() => setRoute('result')}/>}
+              {route === 'result' && <window.ResultScreen onBackToProjects={() => setRoute('dashboard')}/>}
+            </main>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
