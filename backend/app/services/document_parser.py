@@ -1,5 +1,10 @@
+import base64
+import io
+import logging
 import os
 from typing import List
+
+logger = logging.getLogger(__name__)
 
 
 def parse_project_files(file_paths: List[str]) -> str:
@@ -24,7 +29,59 @@ def _parse_pdf(path: str) -> str:
             text = page.extract_text()
             if text:
                 texts.append(text)
-    return "\n".join(texts)
+    result = "\n".join(texts)
+    if result.strip():
+        return result
+    # Scanned PDF — no text layer, fall back to Claude Vision OCR
+    logger.info("No text layer in %s — using Claude Vision OCR", os.path.basename(path))
+    return _parse_pdf_vision(path)
+
+
+def _parse_pdf_vision(path: str) -> str:
+    """Extract text from a scanned PDF via Claude Vision (page by page)."""
+    from pdf2image import convert_from_path
+    import anthropic
+    from app.config import settings
+
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    images = convert_from_path(path, dpi=150, fmt="jpeg")
+    texts = []
+
+    for i, img in enumerate(images):
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        img_b64 = base64.standard_b64encode(buf.getvalue()).decode()
+
+        resp = client.messages.create(
+            model=settings.extraction_model,
+            max_tokens=2048,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": img_b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Извлеки весь текст с этой страницы документа точно как написано. "
+                            "Верни только текст, без пояснений и форматирования."
+                        ),
+                    },
+                ],
+            }],
+        )
+        text = resp.content[0].text.strip()
+        if text:
+            texts.append(text)
+        logger.debug("Vision OCR page %d: %d chars", i + 1, len(text))
+
+    return "\n\n".join(texts)
 
 
 def _parse_docx(path: str) -> str:
