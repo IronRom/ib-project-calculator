@@ -57,31 +57,117 @@ async def stream_extraction(
     if not calc:
         raise HTTPException(status_code=404, detail="Расчёт не найден")
 
+    # Eagerly load everything before the generator — session closes when streaming starts
+    file_paths = [f.file_path for f in project.files]
+    project_db_id = project.id
+    calc_db_id = calc.id
+
     async def event_stream() -> AsyncGenerator[str, None]:
+        from app.database import SessionLocal
         try:
             yield _sse("progress", {"step": 1, "total": 3, "message": "Извлечение текста из файлов…"})
             await asyncio.sleep(0.1)
 
-            combined_text = parse_project_files([f.file_path for f in project.files])
+            combined_text = parse_project_files(file_paths)
 
             yield _sse("progress", {"step": 2, "total": 3, "message": "AI-анализ технического задания…"})
 
             result = await extract_entities(combined_text)
 
-            calc.extracted_entities = result.model_dump()
-            db.query(Calculation).filter(Calculation.id == calc_id).update(
-                {"extracted_entities": result.model_dump()}
-            )
-            db.query(Project).filter(Project.id == project.id).update({"status": "extracted"})
-            db.commit()
+            with SessionLocal() as new_db:
+                new_db.query(Calculation).filter(Calculation.id == calc_db_id).update(
+                    {"extracted_entities": result.model_dump()}
+                )
+                new_db.query(Project).filter(Project.id == project_db_id).update({"status": "extracted"})
+                new_db.commit()
 
             yield _sse("progress", {"step": 3, "total": 3, "message": "Готово"})
-            yield _sse("done", {"calc_id": calc_id})
+            yield _sse("done", {"calc_id": calc_db_id})
 
         except Exception as exc:
             yield _sse("error", {"message": str(exc)})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/{calc_id}/compute")
+def compute_calculation(
+    project_id: int,
+    calc_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.services.calculator import calculate
+    project = _get_own_project(project_id, current_user.id, db)
+    calc = db.query(Calculation).filter(Calculation.id == calc_id, Calculation.project_id == project.id).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+    if not calc.extracted_entities:
+        raise HTTPException(status_code=422, detail="Сначала запустите извлечение сущностей")
+    result = calculate(calc.extracted_entities, db)
+    calc.calculation_result = result
+    db.commit()
+    return result
+
+
+@router.get("/{calc_id}/unit-check")
+def unit_check(
+    project_id: int,
+    calc_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.services.calculator import _find_active_book, _match_row
+    from app.models import ReferenceRow
+
+    project = _get_own_project(project_id, current_user.id, db)
+    calc = db.query(Calculation).filter(Calculation.id == calc_id, Calculation.project_id == project.id).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+    if not calc.extracted_entities:
+        return []
+
+    entities = calc.extracted_entities.get("entities", [])
+    results = []
+
+    for i, entity in enumerate(entities):
+        x_value  = float(entity.get("x_value") or 0.0)
+        x_unit   = entity.get("x_unit", "")
+        table_num = entity.get("sbts_table")
+        sbts_code = entity.get("sbts_code", "")
+
+        if not table_num:
+            results.append({"index": i, "ok": False, "note": "таблица не определена"})
+            continue
+
+        book = _find_active_book(db, sbts_code)
+        if not book:
+            results.append({"index": i, "ok": False, "note": f"справочник «{sbts_code}» не найден"})
+            continue
+
+        match = _match_row(db, book.id, table_num, x_value, x_unit)
+        if match:
+            results.append({
+                "index": i,
+                "ok": True,
+                "x_effective": match.x_effective,
+                "x_unit_table": match.row.x_unit or x_unit,
+                "note": match.note,
+                "extrapolated": match.extrapolated,
+            })
+        else:
+            table_units = list({
+                r.x_unit for r in db.query(ReferenceRow)
+                .filter(ReferenceRow.book_version_id == book.id, ReferenceRow.table_num == table_num)
+                .all() if r.x_unit
+            })
+            results.append({
+                "index": i,
+                "ok": False,
+                "note": f"нет конверсии «{x_unit}» → {', '.join(table_units) or '?'}",
+            })
+
+    return results
 
 
 @router.get("/{calc_id}", response_model=CalculationOut)

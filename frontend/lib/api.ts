@@ -124,12 +124,66 @@ export function rollbackReference(bookId: number) {
   return request<ReferenceBook>(`/admin/references/${bookId}/rollback`, { method: 'POST' })
 }
 
+export async function exportReferenceExcel(bookId: number, filename: string): Promise<void> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('pir_token') : ''
+  const res = await fetch(`${BASE}/admin/references/${bookId}/export`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function importReferenceExcel(bookId: number, file: File): Promise<ReferenceBook> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('pir_token') : ''
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${BASE}/admin/references/${bookId}/import`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`)
+  return data as ReferenceBook
+}
+
+export function deleteReference(bookId: number) {
+  return request<void>(`/admin/references/${bookId}`, { method: 'DELETE' })
+}
+
+export function computeCalculation(projectId: number, calcId: number) {
+  return request<CalculationResult>(`/projects/${projectId}/calculations/${calcId}/compute`, { method: 'POST' })
+}
+
+export interface UnitCheckItem {
+  index: number
+  ok: boolean
+  note: string
+  x_effective?: number
+  x_unit_table?: string
+  extrapolated?: boolean
+}
+
+export function getUnitCheck(projectId: number, calcId: number) {
+  return request<UnitCheckItem[]>(`/projects/${projectId}/calculations/${calcId}/unit-check`)
+}
+
 export function listIndices() {
   return request<PriceIndex[]>('/admin/indices')
 }
 
 export function createIndex(data: { year: number; quarter: number; index_type: string; index_value: number; source_ref: string }) {
   return request<PriceIndex>('/admin/indices', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export function updateIndex(indexId: number, data: Partial<{ year: number; quarter: number; index_value: number; source_ref: string }>) {
+  return request<PriceIndex>(`/admin/indices/${indexId}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
 
 export function deleteIndex(indexId: number) {
@@ -175,7 +229,7 @@ export interface Calculation {
   project_id: number
   extracted_entities?: ExtractionResult
   confirmed_positions?: unknown
-  calculation_result?: unknown
+  calculation_result?: CalculationResult
   created_at: string
 }
 
@@ -212,6 +266,36 @@ export interface ReferenceBook {
   uploaded_at: string
   activated_at?: string
   notes?: string
+}
+
+export interface CalcPosition {
+  num: number
+  name: string
+  row_description: string
+  unit: string
+  quantity: number
+  justification: string
+  formula: string
+  cost: number
+  book_code: string
+  table_num: number
+  row_num: string
+}
+
+export interface CalculationResult {
+  positions: CalcPosition[]
+  base_cost: number
+  price_index: number
+  price_index_period: string
+  price_index_justification: string
+  stage: string
+  stage_factor: number
+  current_cost: number
+  cost_with_stage: number
+  vat_rate: number
+  vat_amount: number
+  total_with_vat: number
+  errors: string[]
 }
 
 export interface PriceIndex {
