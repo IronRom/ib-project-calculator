@@ -149,7 +149,6 @@ async def extract_entities_openrouter(text: str, model_id: str) -> ExtractionRes
             },
         ],
         "tools": [EXTRACTION_TOOL_OPENAI],
-        "tool_choice": "auto",
     }
     payload["messages"][1]["content"] = (
         "Проанализируй следующее техническое задание и извлеки все объекты. "

@@ -71,7 +71,7 @@ async def openrouter_models():
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
-            "https://openrouter.ai/api/v1/models",
+            "https://openrouter.ai/api/v1/models?supported_parameters=tools",
             headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
         )
 
@@ -84,8 +84,6 @@ async def openrouter_models():
             "pricing": m.get("pricing", {}),
         }
         for m in all_models
-        if "tools" in m.get("supported_parameters", [])
-        and "text" in m.get("architecture", {}).get("modality", "")
     ]
     filtered.sort(key=lambda m: m["name"])
     _or_cache["models"] = filtered
