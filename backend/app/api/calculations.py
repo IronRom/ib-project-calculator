@@ -75,11 +75,12 @@ async def stream_extraction(
             provider_label = f"OpenRouter ({openrouter_model})" if openrouter_model else "Claude claude-sonnet-4-6"
             yield _sse("progress", {"step": 2, "total": 3, "message": f"AI-анализ технического задания… ({provider_label})"})
 
-            if openrouter_model:
-                from app.services.entity_extractor import extract_entities_openrouter
-                result = await extract_entities_openrouter(combined_text, openrouter_model)
-            else:
-                result = await extract_entities(combined_text)
+            with SessionLocal() as new_db:
+                if openrouter_model:
+                    from app.services.entity_extractor import extract_entities_openrouter
+                    result = await extract_entities_openrouter(combined_text, openrouter_model, db=new_db)
+                else:
+                    result = await extract_entities(combined_text, db=new_db)
 
             with SessionLocal() as new_db:
                 new_db.query(Calculation).filter(Calculation.id == calc_db_id).update(
