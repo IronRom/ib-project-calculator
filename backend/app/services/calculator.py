@@ -23,7 +23,8 @@ def _normalize_unit(u: str) -> str:
     u = u.replace("куб.", "м³").replace("m3", "м³").replace("м3", "м³")
     u = u.replace("/час", "/ч").replace("/час.", "/ч")
     u = u.replace("/сутки", "/сут").replace("/суток", "/сут")
-    return u
+    u = re.sub(r"пог\.?\s*", "", u)   # "пог. м" → "м"
+    return u.strip()
 
 
 # (from_unit_normalized, to_unit_normalized) → conversion function
@@ -44,6 +45,16 @@ UNIT_CONVERSIONS: dict[tuple[str, str], Callable[[float], float]] = {
     ("т/г.", "т/сут"):            lambda x: x / 365,
     ("т/сут", "тыс. т/г."):       lambda x: x * 365 / 1000,
     ("тыс. т/г.", "т/сут"):        lambda x: x * 1000 / 365,
+    # cross: м³/ч ↔ тыс. м³/сут
+    ("м³/ч", "тыс. м³/сут"):     lambda x: x * 24 / 1000,
+    ("тыс. м³/сут", "м³/ч"):     lambda x: x * 1000 / 24,
+    # л/с → volume flow
+    ("л/с", "м³/ч"):             lambda x: x * 3.6,
+    ("л/с", "тыс. м³/ч"):        lambda x: x * 0.0036,
+    ("л/с", "м³/сут"):           lambda x: x * 86.4,
+    ("л/с", "тыс. м³/сут"):      lambda x: x * 0.0864,
+    ("м³/ч", "л/с"):             lambda x: x / 3.6,
+    ("тыс. м³/ч", "л/с"):        lambda x: x / 0.0036,
     # distance
     ("км", "м"):                  lambda x: x * 1000,
     ("м", "км"):                  lambda x: x / 1000,
