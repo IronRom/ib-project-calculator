@@ -14,8 +14,64 @@ logger = logging.getLogger(__name__)
 
 _RANGE_ONLY = re.compile(r'^(до|свыше|от)\s+[\d,]', re.IGNORECASE)
 _STRIP_TRAILING_RANGE = re.compile(r'\s+(от|свыше)\s+[\d,].*$', re.IGNORECASE)
+_STRIP_TYPE_SUFFIX = re.compile(
+    r'\s+(производительностью|мощностью|объёмом|длиной|протяженностью)'
+    r'(\s*[\(,по].*)?$',
+    re.IGNORECASE,
+)
+_STRIP_RANGE_COLON = re.compile(r'[,:]?\s*(до|свыше|от)\s+[\d,].*$', re.IGNORECASE)
 # Values Claude sometimes returns instead of real data
 _NULL_LIKE = frozenset({'none', 'null', 'nan', '-', '—', '"', "'"})
+
+
+def _derive_type_name(description: str | None) -> str | None:
+    """Extract the structure type name from a full description, stripping range and unit parts."""
+    if not description:
+        return None
+    name = _STRIP_RANGE_COLON.sub('', description).strip()
+    name = _STRIP_TYPE_SUFFIX.sub('', name).strip().rstrip(',:').strip()
+    return name if name and name.lower() not in _NULL_LIKE else None
+
+
+def rebuild_object_types(db, book_version_id: int) -> int:
+    """
+    Derive unique object types from reference_row descriptions, populate book_object_types,
+    and set object_type_id FK on every reference_row. Idempotent — clears previous types first.
+    Returns number of distinct types created.
+    """
+    from app.models import BookObjectType, ReferenceRow
+
+    rows = (
+        db.query(ReferenceRow)
+        .filter(ReferenceRow.book_version_id == book_version_id)
+        .order_by(ReferenceRow.table_num, ReferenceRow.id)
+        .all()
+    )
+
+    db.query(BookObjectType).filter(BookObjectType.book_version_id == book_version_id).delete()
+    db.flush()
+
+    seen: dict[tuple[int, str], BookObjectType] = {}
+
+    for row in rows:
+        type_name = _derive_type_name(row.description)
+        if not type_name:
+            row.object_type_id = None
+            continue
+        key = (row.table_num, type_name)
+        if key not in seen:
+            bot = BookObjectType(
+                book_version_id=book_version_id,
+                name=type_name,
+                table_num=row.table_num,
+            )
+            db.add(bot)
+            db.flush()
+            seen[key] = bot
+        row.object_type_id = seen[key].id
+
+    db.commit()
+    return len(seen)
 
 
 def _fix_continuation_descriptions(rows: list[dict]) -> list[dict]:

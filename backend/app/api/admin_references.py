@@ -244,7 +244,11 @@ async def parse_reference(
                 ))
                 new_db.commit()
 
-            yield _sse("done", {"rows_parsed": len(rows), "book_id": book_id_val})
+            with SessionLocal() as new_db:
+                from app.services.reference_parser import rebuild_object_types
+                n_types = rebuild_object_types(new_db, book_id_val)
+
+            yield _sse("done", {"rows_parsed": len(rows), "object_types": n_types, "book_id": book_id_val})
 
         except Exception as exc:
             yield _sse("error", {"message": str(exc)})
@@ -364,8 +368,25 @@ def import_excel(
         details={"rows_imported": imported},
     ))
     db.commit()
+
+    from app.services.reference_parser import rebuild_object_types
+    rebuild_object_types(db, book_id)
+
     db.refresh(book)
     return book
+
+
+@router.post("/{book_id}/rebuild-types")
+def rebuild_types(
+    book_id: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Re-derive BookObjectType records from existing reference_rows descriptions."""
+    _get_book(book_id, db)
+    from app.services.reference_parser import rebuild_object_types
+    n = rebuild_object_types(db, book_id)
+    return {"object_types_created": n}
 
 
 def _get_book(book_id: int, db: Session) -> ReferenceBook:

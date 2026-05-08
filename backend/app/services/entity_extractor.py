@@ -20,8 +20,11 @@ _STRIP_RANGE_SUFFIX = re.compile(
 
 
 def _build_reference_context(db) -> str:
-    """Build a prompt section listing unique object types from all active reference books."""
-    from app.models import ReferenceBook, ReferenceRow
+    """Build a prompt section listing unique object types from all active reference books.
+    Uses book_object_types if populated (with stable IDs for AI to return),
+    otherwise falls back to deriving types from reference_rows descriptions.
+    """
+    from app.models import BookObjectType, ReferenceBook, ReferenceRow
 
     active_books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
     if not active_books:
@@ -32,33 +35,51 @@ def _build_reference_context(db) -> str:
         "Каждый тип — отдельная позиция сметы. "
         "Если объект в ТЗ соответствует нескольким типам (КОС = биоочистка + доочистка + осадок) "
         "— создай позицию для каждого.\n"
+        "Для каждой позиции укажи sbts_object_type_id из списка ниже.\n"
     )
 
     for book in active_books:
         lines.append(f"{book.official_name or book.code} (код: {book.code}):")
 
-        rows = (
-            db.query(ReferenceRow.table_num, ReferenceRow.description, ReferenceRow.x_unit)
-            .filter(ReferenceRow.book_version_id == book.id)
-            .order_by(ReferenceRow.table_num, ReferenceRow.id)
+        types = (
+            db.query(BookObjectType)
+            .filter(BookObjectType.book_version_id == book.id)
+            .order_by(BookObjectType.table_num, BookObjectType.id)
             .all()
         )
 
-        seen: set[tuple] = set()
-        for table_num, description, x_unit in rows:
-            if not description:
-                continue
-            # Strip range suffix, then production-capacity suffix to get type name
-            type_name = _STRIP_RANGE_SUFFIX.sub("", description).strip()
-            type_name = _STRIP_TYPE_SUFFIX.sub("", type_name).strip().rstrip(",:").strip()
-            if not type_name:
-                continue
-            key = (table_num, type_name, x_unit or "")
-            if key in seen:
-                continue
-            seen.add(key)
-            unit_str = f" → {x_unit}" if x_unit else ""
-            lines.append(f"  Таблица {table_num}: {type_name}{unit_str}")
+        if types:
+            for t in types:
+                sample = (
+                    db.query(ReferenceRow.x_unit)
+                    .filter(ReferenceRow.object_type_id == t.id, ReferenceRow.x_unit.isnot(None))
+                    .first()
+                )
+                unit = sample[0] if sample else ""
+                unit_str = f" → {unit}" if unit else ""
+                lines.append(f"  Таблица {t.table_num} [type_id={t.id}]: {t.name}{unit_str}")
+        else:
+            # Fallback: derive from reference_rows when book_object_types not yet populated
+            rows = (
+                db.query(ReferenceRow.table_num, ReferenceRow.description, ReferenceRow.x_unit)
+                .filter(ReferenceRow.book_version_id == book.id)
+                .order_by(ReferenceRow.table_num, ReferenceRow.id)
+                .all()
+            )
+            seen: set[tuple] = set()
+            for table_num, description, x_unit in rows:
+                if not description:
+                    continue
+                type_name = _STRIP_RANGE_SUFFIX.sub("", description).strip()
+                type_name = _STRIP_TYPE_SUFFIX.sub("", type_name).strip().rstrip(",:").strip()
+                if not type_name:
+                    continue
+                key = (table_num, type_name, x_unit or "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                unit_str = f" → {x_unit}" if x_unit else ""
+                lines.append(f"  Таблица {table_num}: {type_name}{unit_str}")
 
         lines.append("")
 
@@ -158,6 +179,7 @@ EXTRACTION_TOOL = {
                         "address": {"type": "string"},
                         "sbts_code": {"type": "string", "description": "Код СБЦП, например 81-2001-17"},
                         "sbts_table": {"type": "integer", "description": "Номер таблицы СБЦП"},
+                        "sbts_object_type_id": {"type": "integer", "description": "ID типа объекта из списка [type_id=X] в справочнике — обязательно указывать если список доступен"},
                         "x_value": {"type": "number"},
                         "x_unit": {"type": "string"},
                         "coefficients": {

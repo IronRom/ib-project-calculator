@@ -142,10 +142,11 @@ def unit_check(
     results = []
 
     for i, entity in enumerate(entities):
-        x_value  = float(entity.get("x_value") or 0.0)
-        x_unit   = entity.get("x_unit", "")
-        table_num = entity.get("sbts_table")
-        sbts_code = entity.get("sbts_code", "")
+        x_value        = float(entity.get("x_value") or 0.0)
+        x_unit         = entity.get("x_unit", "")
+        table_num      = entity.get("sbts_table")
+        sbts_code      = entity.get("sbts_code", "")
+        object_type_id = entity.get("sbts_object_type_id")
 
         if not table_num:
             results.append({"index": i, "ok": False, "note": "таблица не определена"})
@@ -156,7 +157,7 @@ def unit_check(
             results.append({"index": i, "ok": False, "note": f"справочник «{sbts_code}» не найден"})
             continue
 
-        match = _match_row(db, book.id, table_num, x_value, x_unit)
+        match = _match_row(db, book.id, table_num, x_value, x_unit, object_type_id)
         if match:
             results.append({
                 "index": i,

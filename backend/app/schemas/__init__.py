@@ -78,6 +78,7 @@ class ExtractedEntity(BaseModel):
     address: str
     sbts_code: str = ""
     sbts_table: Optional[int] = None
+    sbts_object_type_id: Optional[int] = None
     x_value: Optional[float] = None
     x_unit: str = ""
     coefficients: list[CoefficientInput] = []

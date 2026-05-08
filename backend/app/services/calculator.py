@@ -82,15 +82,15 @@ def _match_row(
     table_num: int,
     x_value: float,
     x_unit: str,
+    object_type_id: Optional[int] = None,
 ) -> Optional[RowMatch]:
-    all_rows: list[ReferenceRow] = (
-        db.query(ReferenceRow)
-        .filter(
-            ReferenceRow.book_version_id == book_version_id,
-            ReferenceRow.table_num == table_num,
-        )
-        .all()
+    q = db.query(ReferenceRow).filter(
+        ReferenceRow.book_version_id == book_version_id,
+        ReferenceRow.table_num == table_num,
     )
+    if object_type_id is not None:
+        q = q.filter(ReferenceRow.object_type_id == object_type_id)
+    all_rows: list[ReferenceRow] = q.all()
     if not all_rows:
         return None
 
@@ -177,11 +177,12 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     errors = []
 
     for entity in entities:
-        sbts_code   = entity.get("sbts_code", "")
-        table_num   = entity.get("sbts_table")
-        x_value     = float(entity.get("x_value") or 0.0)
-        x_unit      = entity.get("x_unit", "")
-        object_name = entity.get("object_name", "")
+        sbts_code      = entity.get("sbts_code", "")
+        table_num      = entity.get("sbts_table")
+        object_type_id = entity.get("sbts_object_type_id")
+        x_value        = float(entity.get("x_value") or 0.0)
+        x_unit         = entity.get("x_unit", "")
+        object_name    = entity.get("object_name", "")
 
         if not table_num:
             errors.append(f"{object_name}: не определена таблица СБЦП")
@@ -192,7 +193,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             errors.append(f"{object_name}: активный справочник «{sbts_code}» не найден")
             continue
 
-        match = _match_row(db, book.id, table_num, x_value, x_unit)
+        match = _match_row(db, book.id, table_num, x_value, x_unit, object_type_id)
         if not match:
             errors.append(
                 f"{object_name}: строка для X={x_value} {x_unit} в таблице №{table_num} не найдена"
