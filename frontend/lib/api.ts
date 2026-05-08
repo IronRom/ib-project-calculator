@@ -92,10 +92,24 @@ export function getCalculation(projectId: number, calcId: number) {
   return request<Calculation>(`/projects/${projectId}/calculations/${calcId}`)
 }
 
-export function streamExtraction(projectId: number, calcId: number): EventSource {
+export function streamExtraction(projectId: number, calcId: number, model?: string): EventSource {
   const token = getToken()
-  const url = `${BASE}/projects/${projectId}/calculations/${calcId}/stream${token ? `?token=${token}` : ''}`
-  return new EventSource(url)
+  const params = new URLSearchParams()
+  if (token) params.set('token', token)
+  if (model) params.set('model', model)
+  const qs = params.toString()
+  return new EventSource(`${BASE}/projects/${projectId}/calculations/${calcId}/stream${qs ? `?${qs}` : ''}`)
+}
+
+export interface OpenRouterModel {
+  id: string
+  name: string
+  context_length?: number
+  pricing?: { prompt?: string; completion?: string }
+}
+
+export function listOpenRouterModels() {
+  return request<OpenRouterModel[]>('/openrouter/models')
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────

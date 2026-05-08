@@ -1,25 +1,60 @@
+import json
+
 import anthropic
+import httpx
 
 from app.config import settings
 from app.schemas import ExtractionResult
 
 SYSTEM_PROMPT = """Ты опытный сметчик ПИР (проектно-изыскательских работ) в России.
-Твоя задача — извлечь из Технического задания (ТЗ) все объекты строительства и их параметры для расчёта стоимости ПИР по справочнику базовых цен (СБЦП).
+Твоя задача — извлечь из Технического задания (ТЗ) все объекты и их параметры для расчёта стоимости ПИР по СБЦП 81-2001-17.
 
-Для каждого объекта определи:
-1. Категория: new_construction (новое строительство), reconstruction (реконструкция), overhaul (капитальный ремонт)
-2. Тип объекта по СБЦП (КНС, ВЗУ, ОС, Водовод, Коллектор, Насосная станция I подъёма, Жилой дом, Промышленное здание и т.д.)
-3. Название объекта из ТЗ
-4. Адрес/регион (влияет на коэффициенты)
-5. Параметр X — главный натуральный показатель для формулы СБЦП (производительность, длина, площадь и т.д.)
-6. Единица X (тыс. м³/ч, км, м, тыс. м³/сут, м², т/сут и т.д.)
-7. Номер таблицы СБЦП 81-2001-17 если применимо (1=НС I подъёма, 2=ВЗУ подземные, 3=Водовод, 4=ВОС, 5=НС II подъёма+резервуары, 8=Коллектор, 9=КНС, 10=ОС канализации, 11=Осадок, 14=Выпуски)
-8. Применимые коэффициенты (реконструкция×1.5, заглубление, АСУ, тип труб и т.д.)
-9. Стадия проектирования (П, Р, или П+Р)
-10. Что не удалось определить
+═══ ПРАВИЛА ИЗВЛЕЧЕНИЯ ═══
 
-Важно: один ТЗ может содержать несколько объектов — извлеки ВСЕ.
-При реконструкции и капремонте — выбирай самую дорогую категорию из применимых."""
+КАТЕГОРИЯ объекта (строго из ТЗ):
+  new_construction — новое строительство
+  reconstruction   — реконструкция
+  overhaul         — капитальный ремонт
+
+ПАРАМЕТР X — только в единицах таблицы СБЦП, не в единицах ТЗ:
+  Таблица 1  (НС I подъёма)          → тыс. м³/сут
+  Таблица 2  (ВЗУ подземные)         → м³/ч
+  Таблица 3  (Водовод)               → км
+  Таблица 4  (ВОС)                   → тыс. м³/сут
+  Таблица 5  (НС II подъёма)         → тыс. м³/ч
+  Таблица 5  (Резервуары)            → тыс. м³
+  Таблица 8  (Коллектор)             → км
+  Таблица 9  (КНС)                   → тыс. м³/сут
+  Таблица 10 (ОС канализации)        → тыс. м³/сут
+  Таблица 11 (Обработка осадка)      → т/сут (сухого вещества)
+  Таблица 14 (Выпуски, дюкеры)       → м
+  Пример: ТЗ пишет "650 тыс. м³/сут" → x_value=650, x_unit="тыс. м³/сут"
+  Пример: ТЗ пишет "104 000 м³/сут"  → x_value=104, x_unit="тыс. м³/сут"
+
+ОДИН ТЗ → НЕСКОЛЬКО СТРОК СБЦП:
+  Сложный объект (ОС, ВЗУ, КНС с вспомогательными зданиями) порождает
+  несколько позиций в смете — по одной на каждый пункт СБЦП.
+  Извлеки ВСЕ, даже если X неизвестен (x_value=null).
+
+КОЭФФИЦИЕНТЫ — только те, что явно следуют из ТЗ:
+  Указывай тип коэффициента (name) и признак применимости (value=1 если применимо).
+  НЕ назначай числовые значения — они берутся из справочника.
+  Допустимые типы:
+    "reconstruction"  — реконструкция (категория = reconstruction)
+    "overhaul"        — капитальный ремонт (категория = overhaul)
+    "asu"             — микропроцессорные контроллеры / АСУ / АСДКУ / АСКП упомянуты в ТЗ
+    "deepening"       — заглубление подземной части > 10 м указано в ТЗ
+    "seismic"         — сейсмика > 6 баллов МСК указана в ТЗ
+    "fishery"         — сброс в водоём рыбохозяйственного значения (I, II кат.) указан в ТЗ
+  НЕ добавляй районные, территориальные или климатические коэффициенты —
+  для ПИР (проектных работ) они не применяются по Методике №620.
+
+СТАДИЯ — из текста ТЗ:
+  "П"   — только проектная документация
+  "Р"   — только рабочая документация
+  "П+Р" — проектная и рабочая документация вместе
+
+АДРЕС — извлекай точно из ТЗ, без интерпретации."""
 
 EXTRACTION_TOOL = {
     "name": "extract_pir_entities",
@@ -47,13 +82,25 @@ EXTRACTION_TOOL = {
                         "x_unit": {"type": "string"},
                         "coefficients": {
                             "type": "array",
+                            "description": "Флаги применимых коэффициентов. value всегда 1 — числовые значения берутся из справочника.",
                             "items": {
                                 "type": "object",
                                 "required": ["name", "value"],
                                 "properties": {
-                                    "name": {"type": "string"},
-                                    "value": {"type": "number"},
-                                    "source": {"type": "string"},
+                                    "name": {
+                                        "type": "string",
+                                        "enum": ["reconstruction", "overhaul", "asu", "deepening", "seismic", "fishery"],
+                                        "description": "Тип коэффициента",
+                                    },
+                                    "value": {
+                                        "type": "number",
+                                        "const": 1,
+                                        "description": "Всегда 1 — признак применимости",
+                                    },
+                                    "reason": {
+                                        "type": "string",
+                                        "description": "Цитата или ссылка из ТЗ обосновывающая применение",
+                                    },
                                 },
                             },
                         },
@@ -77,6 +124,63 @@ EXTRACTION_TOOL = {
         },
     },
 }
+
+
+# OpenAI-compatible tool schema for OpenRouter (same JSON Schema, different wrapper)
+EXTRACTION_TOOL_OPENAI = {
+    "type": "function",
+    "function": {
+        "name": EXTRACTION_TOOL["name"],
+        "description": EXTRACTION_TOOL["description"],
+        "parameters": EXTRACTION_TOOL["input_schema"],
+    },
+}
+
+
+async def extract_entities_openrouter(text: str, model_id: str) -> ExtractionResult:
+    payload = {
+        "model": model_id,
+        "max_tokens": 4096,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"Проанализируй следующее техническое задание и извлеки все объекты:\n\n{text[:50000]}",
+            },
+        ],
+        "tools": [EXTRACTION_TOOL_OPENAI],
+        "tool_choice": {"type": "function", "function": {"name": "extract_pir_entities"}},
+    }
+
+    async with httpx.AsyncClient(timeout=180) as client:
+        resp = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {settings.openrouter_api_key}",
+                "HTTP-Referer": "https://ib-pir-calculator.ru",
+                "X-Title": "ИС ПИР Калькулятор",
+            },
+        )
+        resp.raise_for_status()
+
+    data = resp.json()
+    tool_calls = (
+        data.get("choices", [{}])[0]
+        .get("message", {})
+        .get("tool_calls", [])
+    )
+    if not tool_calls:
+        return ExtractionResult(
+            entities=[],
+            stage="П+Р",
+            region="",
+            missing_data=[f"OpenRouter ({model_id}): не вернул tool_call"],
+            overall_confidence=0.0,
+        )
+
+    args = json.loads(tool_calls[0]["function"]["arguments"])
+    return ExtractionResult(**args)
 
 
 async def extract_entities(text: str) -> ExtractionResult:

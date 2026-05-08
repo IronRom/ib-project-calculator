@@ -1,5 +1,7 @@
 import os
+import time
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,11 +11,13 @@ from app.database import engine
 from app.models import Base, User
 from app.api.auth import hash_password
 
+_or_cache: dict = {"models": [], "fetched_at": 0.0}
+
 app = FastAPI(title="ИБ Калькулятор ПИР", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://frontend:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://frontend:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,3 +60,34 @@ def _ensure_admin():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/openrouter/models")
+async def openrouter_models():
+    if not settings.openrouter_api_key:
+        return []
+    if time.time() - _or_cache["fetched_at"] < 3600 and _or_cache["models"]:
+        return _or_cache["models"]
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
+        )
+
+    all_models = resp.json().get("data", [])
+    filtered = [
+        {
+            "id": m["id"],
+            "name": m.get("name", m["id"]),
+            "context_length": m.get("context_length"),
+            "pricing": m.get("pricing", {}),
+        }
+        for m in all_models
+        if "tools" in m.get("supported_parameters", [])
+        and "text" in m.get("architecture", {}).get("modality", "")
+    ]
+    filtered.sort(key=lambda m: m["name"])
+    _or_cache["models"] = filtered
+    _or_cache["fetched_at"] = time.time()
+    return filtered

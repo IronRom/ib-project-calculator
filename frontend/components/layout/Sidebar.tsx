@@ -11,7 +11,7 @@ const NAV_ITEMS = [
 const ADMIN_ITEMS = [
   { href: '/admin/users', label: 'Пользователи', icon: '👤' },
   { href: '/admin/references', label: 'Справочники', icon: '📚' },
-  { href: '/admin/indices', label: 'Индексы', icon: '📊' },
+  { href: '/admin/indices', label: 'Коэффициенты', icon: '📊' },
 ]
 
 interface SidebarProps {

@@ -23,7 +23,7 @@ def create_index(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    if body.quarter not in (1, 2, 3, 4):
+    if body.index_type != "vat" and body.quarter not in (1, 2, 3, 4):
         raise HTTPException(status_code=422, detail="Квартал должен быть от 1 до 4")
     existing = db.query(PriceIndex).filter(
         PriceIndex.year == body.year,
@@ -37,6 +37,24 @@ def create_index(
         )
     idx = PriceIndex(**body.model_dump())
     db.add(idx)
+    db.commit()
+    db.refresh(idx)
+    return idx
+
+
+@router.patch("/{index_id}", response_model=PriceIndexOut)
+def update_index(
+    index_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    idx = db.query(PriceIndex).filter(PriceIndex.id == index_id).first()
+    if not idx:
+        raise HTTPException(status_code=404, detail="Не найден")
+    for field in ("year", "quarter", "index_value", "source_ref"):
+        if field in body:
+            setattr(idx, field, body[field])
     db.commit()
     db.refresh(idx)
     return idx

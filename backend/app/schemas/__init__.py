@@ -63,10 +63,12 @@ class ProjectOut(BaseModel):
 
 # ── Calculations ──────────────────────────────────────────────────────────────
 
+COEFF_TYPES = Literal["reconstruction", "overhaul", "asu", "deepening", "seismic", "fishery"]
+
 class CoefficientInput(BaseModel):
-    name: str
-    value: float
-    source: str = ""
+    name: COEFF_TYPES
+    value: float = 1.0
+    reason: str = ""
 
 
 class ExtractedEntity(BaseModel):

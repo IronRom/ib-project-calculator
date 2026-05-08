@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { getProject, startCalculation, uploadFile, deleteFile, getMe, Project, ProjectFile } from '@/lib/api'
+import { getProject, startCalculation, uploadFile, deleteFile, getMe, listOpenRouterModels, Project, ProjectFile, OpenRouterModel } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
@@ -22,12 +22,19 @@ export default function ProjectPage() {
   const [calculating, setCalculating] = useState(false)
   const [error, setError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [orModels, setOrModels] = useState<OpenRouterModel[]>([])
+  const [orModel, setOrModel] = useState('')
+  const [orCalculating, setOrCalculating] = useState(false)
 
   useEffect(() => {
     Promise.all([getProject(Number(id)), getMe()]).then(([proj, user]) => {
       setProject(proj)
       setCanCalculate(user.can_calculate || user.role === 'admin')
     })
+    listOpenRouterModels().then((models) => {
+      setOrModels(models)
+      if (models.length > 0) setOrModel(models[0].id)
+    }).catch(() => {})
   }, [id])
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>, fileType = 'tz') {
@@ -52,16 +59,18 @@ export default function ProjectPage() {
     setProject((prev) => prev ? { ...prev, files: prev.files.filter((f) => f.id !== fileId) } : prev)
   }
 
-  async function handleCalculate() {
+  async function handleCalculate(model?: string) {
     if (!project) return
-    setCalculating(true)
+    model ? setOrCalculating(true) : setCalculating(true)
     setError('')
     try {
       const calc = await startCalculation(project.id)
-      router.push(`/projects/${project.id}/processing?calc=${calc.id}`)
+      const qs = new URLSearchParams({ calc: String(calc.id) })
+      if (model) qs.set('model', model)
+      router.push(`/projects/${project.id}/processing?${qs.toString()}`)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Ошибка запуска расчёта')
-      setCalculating(false)
+      model ? setOrCalculating(false) : setCalculating(false)
     }
   }
 
@@ -81,10 +90,10 @@ export default function ProjectPage() {
             )}
             <Button
               variant="primary"
-              disabled={!canCalculate || project.files.length === 0 || calculating}
-              onClick={handleCalculate}
+              disabled={!canCalculate || project.files.length === 0 || calculating || orCalculating}
+              onClick={() => handleCalculate()}
             >
-              {calculating ? 'Запуск…' : 'Рассчитать ПИР'}
+              {calculating ? 'Запуск…' : 'Рассчитать (Claude)'}
             </Button>
           </div>
         }
@@ -138,6 +147,43 @@ export default function ProjectPage() {
             </table>
           )}
         </div>
+
+        {/* OpenRouter */}
+        {canCalculate && project.files.length > 0 && orModels.length > 0 && (
+          <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Анализ через OpenRouter</div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <select
+                value={orModel}
+                onChange={(e) => setOrModel(e.target.value)}
+                style={{ flex: 1, background: 'var(--bg-input)', border: 'var(--hairline)', borderRadius: 'var(--radius-md)', padding: '7px 10px', fontSize: 12, color: 'var(--fg-1)', fontFamily: 'var(--font-mono)' }}
+              >
+                {orModels.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!orModel || orCalculating || calculating}
+                onClick={() => handleCalculate(orModel)}
+              >
+                {orCalculating ? 'Запуск…' : 'Рассчитать'}
+              </Button>
+            </div>
+            {orModel && (() => {
+              const m = orModels.find((x) => x.id === orModel)
+              if (!m) return null
+              const prompt = m.pricing?.prompt ? `$${(parseFloat(m.pricing.prompt) * 1e6).toFixed(2)}/M` : ''
+              const ctx = m.context_length ? `${(m.context_length / 1000).toFixed(0)}K ctx` : ''
+              return (
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>
+                  {[m.id, ctx, prompt].filter(Boolean).join(' · ')}
+                </div>
+              )
+            })()}
+          </div>
+        )}
 
         {/* Hint */}
         {project.files.length > 0 && !canCalculate && (

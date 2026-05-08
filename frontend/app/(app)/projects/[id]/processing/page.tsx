@@ -14,6 +14,7 @@ export default function ProcessingPage() {
   const { id } = useParams<{ id: string }>()
   const searchParams = useSearchParams()
   const calcId = searchParams.get('calc')
+  const orModel = searchParams.get('model')
   const router = useRouter()
   const [progress, setProgress] = useState<ProgressState>({ step: 0, total: 3, message: 'Инициализация…' })
   const [error, setError] = useState('')
@@ -23,7 +24,10 @@ export default function ProcessingPage() {
 
     const token = localStorage.getItem('pir_token')
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    const url = `${apiUrl}/projects/${id}/calculations/${calcId}/stream${token ? `?token=${token}` : ''}`
+    const params = new URLSearchParams()
+    if (token) params.set('token', token)
+    if (orModel) params.set('model', orModel)
+    const url = `${apiUrl}/projects/${id}/calculations/${calcId}/stream?${params.toString()}`
     const es = new EventSource(url)
 
     es.addEventListener('progress', (e) => {
@@ -48,7 +52,7 @@ export default function ProcessingPage() {
     })
 
     return () => es.close()
-  }, [id, calcId, router])
+  }, [id, calcId, orModel, router])
 
   const pct = progress.total > 0 ? Math.round((progress.step / progress.total) * 100) : 0
 

@@ -29,5 +29,23 @@ def _parse_pdf(path: str) -> str:
 
 def _parse_docx(path: str) -> str:
     from docx import Document
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+    def _cell_text(tc) -> str:
+        return "".join(node.text or "" for node in tc.iter() if node.tag == f"{{{W}}}t")
+
     doc = Document(path)
-    return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    parts = []
+    for block in doc.element.body:
+        tag = block.tag.split("}")[-1] if "}" in block.tag else block.tag
+        if tag == "p":
+            text = "".join(node.text or "" for node in block.iter() if node.tag == f"{{{W}}}t")
+            if text.strip():
+                parts.append(text.strip())
+        elif tag == "tbl":
+            for tr in block.findall(f".//{{{W}}}tr"):
+                cells = [_cell_text(tc).strip() for tc in tr.findall(f".//{{{W}}}tc")]
+                row_text = " | ".join(c for c in cells if c)
+                if row_text:
+                    parts.append(row_text)
+    return "\n".join(parts)

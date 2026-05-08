@@ -39,6 +39,7 @@ async def stream_extraction(
     project_id: int,
     calc_id: int,
     token: str | None = None,
+    model: str | None = None,
     db: Session = Depends(get_db),
 ):
     from jose import JWTError, jwt as jose_jwt
@@ -61,6 +62,7 @@ async def stream_extraction(
     file_paths = [f.file_path for f in project.files]
     project_db_id = project.id
     calc_db_id = calc.id
+    openrouter_model = model  # capture for closure
 
     async def event_stream() -> AsyncGenerator[str, None]:
         from app.database import SessionLocal
@@ -70,9 +72,14 @@ async def stream_extraction(
 
             combined_text = parse_project_files(file_paths)
 
-            yield _sse("progress", {"step": 2, "total": 3, "message": "AI-анализ технического задания…"})
+            provider_label = f"OpenRouter ({openrouter_model})" if openrouter_model else "Claude claude-sonnet-4-6"
+            yield _sse("progress", {"step": 2, "total": 3, "message": f"AI-анализ технического задания… ({provider_label})"})
 
-            result = await extract_entities(combined_text)
+            if openrouter_model:
+                from app.services.entity_extractor import extract_entities_openrouter
+                result = await extract_entities_openrouter(combined_text, openrouter_model)
+            else:
+                result = await extract_entities(combined_text)
 
             with SessionLocal() as new_db:
                 new_db.query(Calculation).filter(Calculation.id == calc_db_id).update(
