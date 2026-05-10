@@ -60,24 +60,65 @@ Upload ТЗ файлы в проект
 - Каждый справочник имеет `parse_prompt` (кастомизируется в admin)
 - Индексы Минстроя: добавить вручную per квартал
 
-### Claude API (entity extraction)
+### Entity extractor — многопроходная логика
 
-```python
-# backend/app/services/entity_extractor.py
-import anthropic
+`backend/app/services/entity_extractor.py`
 
-client = anthropic.Anthropic()  # читает ANTHROPIC_API_KEY из env
-
-response = client.messages.create(
-    model="claude-sonnet-4-6",
-    max_tokens=4096,
-    system=EXTRACTION_SYSTEM_PROMPT,  # с prompt caching
-    messages=[{"role": "user", "content": combined_text}],
-    tools=[extraction_tool_schema]    # tool_use для structured output
-)
+```
+Step 0  _build_book_list()         → AI определяет нужные справочники из текста ТЗ
+Pass 1  _build_types_context()     → AI извлекает позиции (category/type/address/X/qty)
+        _build_hints_context()       вместе с типами: правила из book_extraction_hints
+        _fill_sbts_codes()          детерминированный: table_num → book.code из БД
+Pass 2  _build_conditions_context() → AI проставляет коэффициенты (keyed conditions)
+Pass 3  _build_resolve_x_context() → AI заполняет null x_value (targeted call)
+        _merge_resolved_x()          никогда не перезаписывает уже заполненные x_value
+        _validate_entities()         sanity check: tz_quote + x_value в тексте ТЗ
 ```
 
+**Данные для AI только из БД**, не из кода:
+- Типы объектов → `book_object_types` (type_id, name, table_num)
+- Правила извлечения → `book_extraction_hints` (trigger_condition, hint_for_ai)
+- Коэффициенты → `book_conditions` (coeff_key, coeff_min, coeff_max, row_range)
+
 `ANTHROPIC_API_KEY` — в `.env`, не в коде.
+
+### Calculation engine
+
+`backend/app/services/calculator.py`
+
+**Поиск строки** (`_match_row`):
+1. Exact range match с unit conversion (UNIT_CONVERSIONS dict)
+2. Extrapolation МУ №620 Прил.1: `a + b × (0.4·X_гран + 0.6·X_задан)`
+3. Fallback: если object_type_id даёт 0 строк → retry без фильтра по типу
+
+**Коэффициенты**:
+- `_resolve_coeff_values()`: заменяет AI-флаг (value=1.0) на реальный coeff_min из book_conditions
+  Lookup: table-specific → global (table_num=NULL)
+- `_apply_coefficients()` по МУ №620 п.3.14:
+  - ценообразующие (reconstruction, overhaul) → перемножить
+  - усложняющие (asu, seismic, deepening, fishery) → сумма дробных частей + 1
+
+**Формула** (русский формат): `(147380+242530*0,15316)*1,2`
+**Обоснование**: `СБЦП 81-2001-17, табл. 9, п. 1 (до 0,25); п. 2.9 (АСУ К=1,2)`
+
+### ПРАВИЛО УНИВЕРСАЛЬНОСТИ — обязательно соблюдать
+
+> Система рассчитана на **любой** СБЦП/МРР из любой отрасли. Их будут десятки.
+
+**НЕЛЬЗЯ хардкодить:**
+- коды справочников (81-2001-17, МРР и т.п.) в calc engine или extractor
+- номера таблиц или диапазоны X для конкретного типа объекта
+- значения коэффициентов (все берутся из `book_conditions`)
+- названия типов объектов (все из `book_object_types`)
+- любую логику вида "если тип=КНС → таблица 9" или "если ГНБ → x_value = ..."
+
+**МОЖНО (и нужно):**
+- добавлять записи в `book_extraction_hints` — правила per справочник, редактируемые в admin
+- добавлять записи в `book_conditions` — коэффициенты per справочник/таблица
+- добавлять unit conversions в `UNIT_CONVERSIONS` dict (универсальные)
+- улучшать общие алгоритмы match/extrapolation/apply
+
+Нарушение этого правила — всегда техдолг. Если хочется хардкодить → ищи способ вынести в БД.
 
 ### Roadmap (не реализуем сейчас)
 
