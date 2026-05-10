@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { listReferences, activateReference, rollbackReference, exportReferenceExcel, importReferenceExcel, deleteReference, listHints, createHint, updateHint, deleteHint, ReferenceBook, ExtractionHint, ExtractionHintIn } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
@@ -202,62 +202,64 @@ export default function AdminReferencesPage() {
                   const isImporting = importing === book.id
                   const parsing = isParsing(book.id)
                   return (
-                    <tr key={book.id} style={{ borderBottom: i < books.length - 1 ? 'var(--hairline)' : 'none' }}>
-                      <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--blue-300)' }}>
-                        {book.code}
-                        {book.is_active && <Chip tone="info" style={{ marginLeft: 8 }}>Активен</Chip>}
-                      </td>
-                      <td style={{ padding: '12px 14px', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {book.official_name}
-                      </td>
-                      <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>v{book.version}</td>
-                      <td style={{ padding: '12px 14px' }}>
-                        <Chip tone={st.tone}>{st.label}</Chip>
-                      </td>
-                      <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-3)' }}>
-                        {new Date(book.uploaded_at).toLocaleDateString('ru-RU')}
-                      </td>
-                      <td style={{ padding: '12px 14px' }}>
-                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                          {book.status === 'requires_parsing' && (
-                            <Button size="sm" variant="secondary" disabled={parsing} onClick={() => handleParse(book)}>
-                              {parsing
-                                ? `${parseState!.page}/${parseState!.total || '?'} стр.`
-                                : 'Парсить PDF'}
+                    <React.Fragment key={book.id}>
+                      <tr style={{ borderBottom: expandedHintsId === book.id ? 'none' : i < books.length - 1 ? 'var(--hairline)' : 'none' }}>
+                        <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--blue-300)' }}>
+                          {book.code}
+                          {book.is_active && <Chip tone="info" style={{ marginLeft: 8 }}>Активен</Chip>}
+                        </td>
+                        <td style={{ padding: '12px 14px', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {book.official_name}
+                        </td>
+                        <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>v{book.version}</td>
+                        <td style={{ padding: '12px 14px' }}>
+                          <Chip tone={st.tone}>{st.label}</Chip>
+                        </td>
+                        <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-3)' }}>
+                          {new Date(book.uploaded_at).toLocaleDateString('ru-RU')}
+                        </td>
+                        <td style={{ padding: '12px 14px' }}>
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                            {book.status === 'requires_parsing' && (
+                              <Button size="sm" variant="secondary" disabled={parsing} onClick={() => handleParse(book)}>
+                                {parsing
+                                  ? `${parseState!.page}/${parseState!.total || '?'} стр.`
+                                  : 'Парсить PDF'}
+                              </Button>
+                            )}
+                            <Button size="sm" variant="secondary" onClick={() => handleExport(book)}>
+                              ↓ Excel
                             </Button>
-                          )}
-                          <Button size="sm" variant="secondary" onClick={() => handleExport(book)}>
-                            ↓ Excel
-                          </Button>
-                          <Button size="sm" variant="secondary" disabled={isImporting} onClick={() => handleImportClick(book.id)}>
-                            {isImporting ? 'Загрузка…' : '↑ Excel'}
-                          </Button>
-                          {book.status === 'consistent' && !book.is_active && (
-                            <Button size="sm" variant="primary" onClick={() => handleActivate(book)}>Активировать</Button>
-                          )}
-                          {book.is_active && (
-                            <Button size="sm" variant="danger" onClick={() => handleRollback(book)}>Откатить</Button>
-                          )}
-                          {!book.is_active && (
-                            <Button size="sm" variant="danger" onClick={() => handleDelete(book)}>Удалить</Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant={expandedHintsId === book.id ? 'primary' : 'secondary'}
-                            onClick={() => setExpandedHintsId(expandedHintsId === book.id ? null : book.id)}
-                          >
-                            Условия
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                    {expandedHintsId === book.id && (
-                      <tr key={`hints-${book.id}`}>
-                        <td colSpan={6} style={{ padding: 0, background: 'var(--bg-surface)' }}>
-                          <HintsPanel bookId={book.id} bookCode={book.code} onClose={() => setExpandedHintsId(null)} />
+                            <Button size="sm" variant="secondary" disabled={isImporting} onClick={() => handleImportClick(book.id)}>
+                              {isImporting ? 'Загрузка…' : '↑ Excel'}
+                            </Button>
+                            {book.status === 'consistent' && !book.is_active && (
+                              <Button size="sm" variant="primary" onClick={() => handleActivate(book)}>Активировать</Button>
+                            )}
+                            {book.is_active && (
+                              <Button size="sm" variant="danger" onClick={() => handleRollback(book)}>Откатить</Button>
+                            )}
+                            {!book.is_active && (
+                              <Button size="sm" variant="danger" onClick={() => handleDelete(book)}>Удалить</Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant={expandedHintsId === book.id ? 'primary' : 'secondary'}
+                              onClick={() => setExpandedHintsId(expandedHintsId === book.id ? null : book.id)}
+                            >
+                              Условия
+                            </Button>
+                          </div>
                         </td>
                       </tr>
-                    )}
+                      {expandedHintsId === book.id && (
+                        <tr>
+                          <td colSpan={6} style={{ padding: 0, background: 'var(--bg-surface)', borderBottom: i < books.length - 1 ? 'var(--hairline)' : 'none' }}>
+                            <HintsPanel bookId={book.id} bookCode={book.code} onClose={() => setExpandedHintsId(null)} />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   )
                 })}
               </tbody>
