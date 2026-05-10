@@ -504,7 +504,8 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
             "max_tokens": max_tokens,
             "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
             "tools": tools,
-            "tool_choice": {"type": "function", "function": {"name": tool_name}},
+            # No tool_choice — let the model decide; avoids 404 on providers
+            # that don't support forced function calling.
         }
         async with httpx.AsyncClient(timeout=180) as http:
             resp = await http.post(
