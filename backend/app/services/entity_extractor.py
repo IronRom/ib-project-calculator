@@ -1,12 +1,13 @@
 import json
 import re
+from itertools import groupby
 from typing import Optional
 
 import anthropic
 import httpx
 
 from app.config import settings
-from app.schemas import ExtractionResult
+from app.schemas import CoefficientInput, ExtractionResult
 
 _STRIP_TYPE_SUFFIX = re.compile(
     r'\s+(производительностью|мощностью|объёмом|длиной|протяженностью)'
@@ -19,9 +20,11 @@ _STRIP_RANGE_SUFFIX = re.compile(
 )
 
 
-def _build_reference_context(db) -> str:
-    """Build prompt section: object types + coefficient conditions from active reference books."""
-    from app.models import BookCondition, BookObjectType, ReferenceBook, ReferenceRow
+# ── Context builders ──────────────────────────────────────────────────────────
+
+def _build_types_context(db) -> str:
+    """Pass 1 context: object types only — no coefficient conditions."""
+    from app.models import BookObjectType, ReferenceBook, ReferenceRow
 
     active_books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
     if not active_books:
@@ -45,13 +48,7 @@ def _build_reference_context(db) -> str:
             .all()
         )
 
-        table_conditions: dict[int | None, list[BookCondition]] = {}
-        for cond in db.query(BookCondition).filter(BookCondition.book_version_id == book.id).all():
-            table_conditions.setdefault(cond.table_num, []).append(cond)
-
         if types:
-            # Group by table_num so conditions appear once per table
-            from itertools import groupby
             for table_num, group in groupby(types, key=lambda t: t.table_num):
                 for t in group:
                     sample = (
@@ -62,9 +59,7 @@ def _build_reference_context(db) -> str:
                     unit = sample[0] if sample else ""
                     unit_str = f" → {unit}" if unit else ""
                     lines.append(f"  Таблица {table_num} [type_id={t.id}]: {t.name}{unit_str}")
-                _append_conditions(lines, table_conditions.get(table_num, []))
         else:
-            # Fallback: derive from reference_rows when book_object_types not yet populated
             rows = (
                 db.query(ReferenceRow.table_num, ReferenceRow.description, ReferenceRow.x_unit)
                 .filter(ReferenceRow.book_version_id == book.id)
@@ -72,7 +67,6 @@ def _build_reference_context(db) -> str:
                 .all()
             )
             seen: set[tuple] = set()
-            last_table = None
             for table_num, description, x_unit in rows:
                 if not description:
                     continue
@@ -86,36 +80,112 @@ def _build_reference_context(db) -> str:
                 seen.add(key)
                 unit_str = f" → {x_unit}" if x_unit else ""
                 lines.append(f"  Таблица {table_num}: {type_name}{unit_str}")
-                if table_num != last_table:
-                    _append_conditions(lines, table_conditions.get(table_num, []))
-                    last_table = table_num
-
-        # Book-wide conditions
-        book_wide = table_conditions.get(None, [])
-        if book_wide:
-            lines.append("  Общие коэффициенты (применимы ко всем таблицам):")
-            _append_conditions(lines, book_wide, indent="    ")
 
         lines.append("")
 
     return "\n".join(lines)
 
 
-def _append_conditions(lines: list[str], conditions: list, indent: str = "    ") -> None:
-    if not conditions:
-        return
-    lines.append(f"{indent}Коэффициенты:")
-    for c in conditions:
-        if c.coeff_min is not None and c.coeff_max is not None:
-            if c.coeff_min == c.coeff_max:
-                coeff_str = f"×{c.coeff_min}"
-            else:
-                coeff_str = f"×{c.coeff_min}–{c.coeff_max}"
-        else:
-            coeff_str = ""
-        key_hint = f" [key={c.coeff_key}]" if c.coeff_key else ""
-        row_hint = f" ({c.row_range})" if c.row_range else ""
-        lines.append(f"{indent}  • {c.condition_short}{row_hint}: {coeff_str}{key_hint}")
+def _build_conditions_context(db, entities: list[dict]) -> str:
+    """Pass 2 context: keyed coefficient conditions for only the tables used in pass 1.
+
+    Queries BookCondition filtered to (book_version_id, table_num) pairs
+    found in extracted entities. Also includes book-wide conditions (table_num=NULL).
+    Only conditions with coeff_key are included — those are the ones AI can assign.
+    """
+    from app.models import BookCondition, ReferenceBook
+
+    # Collect needed (book_version_id, table_num) pairs
+    needed: dict[int, set[Optional[int]]] = {}  # book_id → set of table_nums
+
+    for entity in entities:
+        sbts_code = (entity.get("sbts_code") or "").strip()
+        table_num = entity.get("sbts_table")
+        if not sbts_code or not table_num:
+            continue
+
+        book = (
+            db.query(ReferenceBook)
+            .filter(ReferenceBook.is_active == True)
+            .filter(ReferenceBook.code.ilike(f"%{sbts_code.lstrip('СБЦП МРРсбцпмрр ').strip()}%"))
+            .first()
+        )
+        if not book:
+            # Try exact match
+            book = (
+                db.query(ReferenceBook)
+                .filter(ReferenceBook.is_active == True)
+                .filter(ReferenceBook.code == sbts_code)
+                .first()
+            )
+        if not book:
+            continue
+
+        needed.setdefault(book.id, set()).add(table_num)
+        needed[book.id].add(None)  # always include book-wide conditions
+
+    if not needed:
+        return ""
+
+    lines = [
+        "═══ КОЭФФИЦИЕНТЫ ДЛЯ ВЫЯВЛЕННЫХ ТАБЛИЦ ═══\n",
+        "Просмотри каждую позицию из предыдущего ответа и определи — "
+        "применим ли коэффициент на основе текста ТЗ. "
+        "Вызови функцию assign_coefficients.\n",
+    ]
+
+    for book_id, table_nums in needed.items():
+        book = db.get(ReferenceBook, book_id)
+        conditions = (
+            db.query(BookCondition)
+            .filter(
+                BookCondition.book_version_id == book_id,
+                BookCondition.table_num.in_([t for t in table_nums if t is not None]),
+                BookCondition.coeff_key.isnot(None),
+            )
+            .order_by(BookCondition.table_num)
+            .all()
+        )
+        book_wide = (
+            db.query(BookCondition)
+            .filter(
+                BookCondition.book_version_id == book_id,
+                BookCondition.table_num.is_(None),
+                BookCondition.coeff_key.isnot(None),
+            )
+            .all()
+        )
+        all_conds = conditions + book_wide
+        if not all_conds:
+            continue
+
+        lines.append(f"{book.code}:")
+        by_table: dict[Optional[int], list] = {}
+        for c in all_conds:
+            by_table.setdefault(c.table_num, []).append(c)
+
+        for tnum in sorted(by_table, key=lambda x: (x is None, x)):
+            label = f"Таблица {tnum}" if tnum is not None else "Все таблицы"
+            lines.append(f"  {label}:")
+            for c in by_table[tnum]:
+                if c.coeff_min is not None and c.coeff_max is not None:
+                    coeff_str = (
+                        f"×{c.coeff_min}"
+                        if c.coeff_min == c.coeff_max
+                        else f"×{c.coeff_min}–{c.coeff_max}"
+                    )
+                else:
+                    coeff_str = ""
+                row_hint = f" ({c.row_range})" if c.row_range else ""
+                lines.append(
+                    f"    • {c.condition_short}{row_hint}: {coeff_str} [key={c.coeff_key}]"
+                )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ── Tool schemas ──────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """Ты опытный сметчик ПИР (проектно-изыскательских работ) в России.
 Твоя задача — извлечь из Технического задания (ТЗ) все объекты и их параметры для расчёта стоимости ПИР по активному справочнику.
@@ -182,6 +252,20 @@ SYSTEM_PROMPT = """Ты опытный сметчик ПИР (проектно-�
 
 АДРЕС — извлекай точно из ТЗ, без интерпретации."""
 
+_COEFF_ITEM = {
+    "type": "object",
+    "required": ["name", "value"],
+    "properties": {
+        "name": {
+            "type": "string",
+            "enum": ["reconstruction", "overhaul", "asu", "deepening", "seismic", "fishery"],
+            "description": "Тип коэффициента",
+        },
+        "value": {"type": "number", "const": 1, "description": "Всегда 1 — признак применимости"},
+        "reason": {"type": "string", "description": "Цитата или ссылка из ТЗ"},
+    },
+}
+
 EXTRACTION_TOOL = {
     "name": "extract_pir_entities",
     "description": "Извлечь структурированные данные о объектах ПИР из технического задания",
@@ -204,57 +288,67 @@ EXTRACTION_TOOL = {
                         "address": {"type": "string"},
                         "sbts_code": {"type": "string", "description": "Код СБЦП, например 81-2001-17"},
                         "sbts_table": {"type": "integer", "description": "Номер таблицы СБЦП"},
-                        "sbts_object_type_id": {"type": "integer", "description": "ID типа объекта из списка [type_id=X] в справочнике — обязательно указывать если список доступен"},
+                        "sbts_object_type_id": {
+                            "type": "integer",
+                            "description": "ID типа объекта из списка [type_id=X] в справочнике — обязательно указывать если список доступен",
+                        },
                         "x_value": {"type": "number", "description": "Параметр X для ОДНОГО объекта"},
                         "x_unit": {"type": "string"},
-                        "quantity": {"type": "integer", "minimum": 1, "description": "Количество одинаковых объектов. По умолчанию 1. Использовать если несколько объектов в одном месте — формула применяется quantity раз"},
+                        "quantity": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Количество одинаковых объектов. По умолчанию 1.",
+                        },
                         "coefficients": {
                             "type": "array",
-                            "description": "Флаги применимых коэффициентов. value всегда 1 — числовые значения берутся из справочника.",
-                            "items": {
-                                "type": "object",
-                                "required": ["name", "value"],
-                                "properties": {
-                                    "name": {
-                                        "type": "string",
-                                        "enum": ["reconstruction", "overhaul", "asu", "deepening", "seismic", "fishery"],
-                                        "description": "Тип коэффициента",
-                                    },
-                                    "value": {
-                                        "type": "number",
-                                        "const": 1,
-                                        "description": "Всегда 1 — признак применимости",
-                                    },
-                                    "reason": {
-                                        "type": "string",
-                                        "description": "Цитата или ссылка из ТЗ обосновывающая применение",
-                                    },
-                                },
-                            },
+                            "description": "Флаги применимых коэффициентов. value всегда 1.",
+                            "items": _COEFF_ITEM,
                         },
                         "notes": {"type": "string"},
                         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     },
                 },
             },
-            "stage": {
-                "type": "string",
-                "enum": ["П", "Р", "П+Р"],
-                "description": "Стадия проектирования",
-            },
+            "stage": {"type": "string", "enum": ["П", "Р", "П+Р"]},
             "region": {"type": "string"},
-            "missing_data": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Что не удалось определить из ТЗ",
-            },
+            "missing_data": {"type": "array", "items": {"type": "string"}},
             "overall_confidence": {"type": "number", "minimum": 0, "maximum": 1},
         },
     },
 }
 
+COEFF_TOOL = {
+    "name": "assign_coefficients",
+    "description": (
+        "Присвоить применимые коэффициенты к позициям ПИР на основе условий справочника и текста ТЗ. "
+        "Указывай только позиции, где есть хотя бы один применимый коэффициент."
+    ),
+    "input_schema": {
+        "type": "object",
+        "required": ["assignments"],
+        "properties": {
+            "assignments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["entity_index", "coefficients"],
+                    "properties": {
+                        "entity_index": {
+                            "type": "integer",
+                            "description": "0-based индекс позиции из предыдущего ответа",
+                        },
+                        "coefficients": {
+                            "type": "array",
+                            "items": _COEFF_ITEM,
+                        },
+                    },
+                },
+            }
+        },
+    },
+}
 
-# OpenAI-compatible tool schema for OpenRouter (same JSON Schema, different wrapper)
+# OpenAI-compatible wrappers for OpenRouter
 EXTRACTION_TOOL_OPENAI = {
     "type": "function",
     "function": {
@@ -265,14 +359,103 @@ EXTRACTION_TOOL_OPENAI = {
 }
 
 
+# ── Extraction functions ──────────────────────────────────────────────────────
+
+def _user_msg_1(text: str, db) -> str:
+    types_ctx = _build_types_context(db) if db is not None else ""
+    msg = "Проанализируй следующее техническое задание и извлеки все объекты:\n\n"
+    if types_ctx:
+        msg += types_ctx + "\n\n"
+    msg += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + text[: settings.max_tz_chars]
+    return msg
+
+
+def _merge_coefficients(result: ExtractionResult, assignments: list[dict]) -> None:
+    """Merge pass-2 coefficient assignments into pass-1 entities (no duplicates by name)."""
+    for assignment in assignments:
+        idx = assignment.get("entity_index", -1)
+        if not (0 <= idx < len(result.entities)):
+            continue
+        entity = result.entities[idx]
+        existing = {c.name for c in entity.coefficients}
+        for c in assignment.get("coefficients", []):
+            name = c.get("name")
+            if name and name not in existing:
+                try:
+                    entity.coefficients.append(CoefficientInput(**c))
+                    existing.add(name)
+                except Exception:
+                    pass
+
+
+async def extract_entities(text: str, db=None) -> ExtractionResult:
+    """Two-pass extraction (Anthropic):
+    Pass 1 — object types context → entities with sbts_table.
+    Pass 2 — conditions for those tables → coefficient assignments merged in.
+    """
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+    system_block = [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+    user_msg_1 = _user_msg_1(text, db)
+
+    # ── Pass 1 ────────────────────────────────────────────────────────────────
+    resp1 = client.messages.create(
+        model=settings.extraction_model,
+        max_tokens=4096,
+        system=system_block,
+        messages=[{"role": "user", "content": user_msg_1}],
+        tools=[EXTRACTION_TOOL],
+        tool_choice={"type": "tool", "name": "extract_pir_entities"},
+    )
+
+    result: Optional[ExtractionResult] = None
+    for block in resp1.content:
+        if block.type == "tool_use" and block.name == "extract_pir_entities":
+            result = ExtractionResult(**block.input)
+            break
+
+    if not result:
+        return ExtractionResult(entities=[], missing_data=["Не удалось извлечь данные из ТЗ"])
+    if not result.entities or db is None:
+        return result
+
+    # ── Pass 2: conditions for extracted tables only ───────────────────────────
+    entities_dicts = [e.model_dump() for e in result.entities]
+    conditions_ctx = _build_conditions_context(db, entities_dicts)
+
+    if not conditions_ctx:
+        return result  # no keyed conditions for these tables — skip pass 2
+
+    resp2 = client.messages.create(
+        model=settings.extraction_model,
+        max_tokens=1024,
+        system=system_block,  # same system → prompt cache hit on TZ text
+        messages=[
+            {"role": "user", "content": user_msg_1},   # cached
+            {"role": "assistant", "content": resp1.content},  # pass 1 result
+            {"role": "user", "content": conditions_ctx},
+        ],
+        tools=[COEFF_TOOL],
+        tool_choice={"type": "tool", "name": "assign_coefficients"},
+    )
+
+    for block in resp2.content:
+        if block.type == "tool_use" and block.name == "assign_coefficients":
+            _merge_coefficients(result, block.input.get("assignments", []))
+            break
+
+    return result
+
+
 async def extract_entities_openrouter(text: str, model_id: str, db=None) -> ExtractionResult:
-    ref_context = _build_reference_context(db) if db is not None else ""
+    """Single-pass extraction via OpenRouter (no pass-2 coefficient verification)."""
+    types_ctx = _build_types_context(db) if db is not None else ""
     user_content = (
         "Проанализируй следующее техническое задание и извлеки все объекты. "
         "Обязательно вызови функцию extract_pir_entities с результатами.\n\n"
     )
-    if ref_context:
-        user_content += ref_context + "\n\n"
+    if types_ctx:
+        user_content += types_ctx + "\n\n"
     user_content += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + text[: settings.max_tz_chars]
 
     payload = {
@@ -299,49 +482,16 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
 
     data = resp.json()
     tool_calls = (
-        data.get("choices", [{}])[0]
-        .get("message", {})
-        .get("tool_calls", [])
+        data.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
     )
     if not tool_calls:
         return ExtractionResult(
             entities=[],
             stage="П+Р",
             region="",
-            missing_data=[f"OpenRouter ({model_id}): не вернул tool_call — модель не поддерживает принудительный вызов инструмента"],
+            missing_data=[f"OpenRouter ({model_id}): не вернул tool_call"],
             overall_confidence=0.0,
         )
 
     args = json.loads(tool_calls[0]["function"]["arguments"])
     return ExtractionResult(**args)
-
-
-async def extract_entities(text: str, db=None) -> ExtractionResult:
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
-    ref_context = _build_reference_context(db) if db is not None else ""
-    user_content = "Проанализируй следующее техническое задание и извлеки все объекты:\n\n"
-    if ref_context:
-        user_content += ref_context + "\n\n"
-    user_content += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + text[: settings.max_tz_chars]
-
-    response = client.messages.create(
-        model=settings.extraction_model,
-        max_tokens=4096,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[{"role": "user", "content": user_content}],
-        tools=[EXTRACTION_TOOL],
-        tool_choice={"type": "tool", "name": "extract_pir_entities"},
-    )
-
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "extract_pir_entities":
-            return ExtractionResult(**block.input)
-
-    return ExtractionResult(entities=[], missing_data=["Не удалось извлечь данные из ТЗ"])
