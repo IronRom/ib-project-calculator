@@ -85,6 +85,7 @@ class ExtractedEntity(BaseModel):
     coefficients: list[CoefficientInput] = []
     notes: str = ""
     confidence: float = 0.0
+    tz_quote: str = ""         # verbatim excerpt from TZ that justifies this entity
 
 
 class ExtractionResult(BaseModel):

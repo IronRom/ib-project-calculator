@@ -321,10 +321,19 @@ function EntityRow({ entity, unitCheck, isLast, suggested }: { entity: Extracted
           <ConfidenceBadge value={entity.confidence ?? 0} small />
         </td>
       </tr>
-      {entity.notes && (
+      {(entity.notes || entity.tz_quote) && (
         <tr style={{ borderBottom: isLast ? 'none' : 'var(--hairline)', background: rowBg }}>
-          <td colSpan={8} style={{ padding: '4px 14px 10px 14px', fontSize: 12, color: 'var(--fg-3)', fontStyle: 'italic' }}>
-            {entity.notes}
+          <td colSpan={8} style={{ padding: '4px 14px 10px 14px' }}>
+            {entity.tz_quote && (
+              <div style={{ fontSize: 11, color: 'var(--fg-4)', fontFamily: 'var(--font-mono)', marginBottom: entity.notes ? 4 : 0 }}>
+                <span style={{ color: 'var(--fg-3)', marginRight: 4 }}>ТЗ:</span>«{entity.tz_quote}»
+              </div>
+            )}
+            {entity.notes && (
+              <div style={{ fontSize: 12, color: 'var(--fg-3)', fontStyle: 'italic' }}>
+                {entity.notes}
+              </div>
+            )}
           </td>
         </tr>
       )}

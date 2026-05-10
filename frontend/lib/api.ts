@@ -290,6 +290,7 @@ export interface ExtractedEntity {
   coefficients?: { name: string; value: number; source?: string }[]
   notes?: string
   confidence?: number
+  tz_quote?: string
 }
 
 export interface ExtractionResult {
