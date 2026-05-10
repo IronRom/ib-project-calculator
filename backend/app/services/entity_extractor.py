@@ -210,11 +210,6 @@ def _build_conditions_context(db, entities: list[dict]) -> str:
                 lines.append(f"    • {c.condition_short}{row_hint}: {coeff_str} [key={c.coeff_key}]")
         lines.append("")
 
-    # Append extraction hints after types
-    hints_ctx = _build_hints_context(db, book_codes)
-    if hints_ctx:
-        lines.append(hints_ctx)
-
     return "\n".join(lines)
 
 
@@ -444,9 +439,12 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
 
     # ── Pass 1: extract entities ──────────────────────────────────────────────
     types_ctx = _build_types_context(db, detected_codes) if db is not None else ""
+    hints_ctx = _build_hints_context(db, detected_codes) if db is not None else ""
     msg1_content = "Проанализируй ТЗ и извлеки все объекты:\n\n"
     if types_ctx:
         msg1_content += types_ctx + "\n\n"
+    if hints_ctx:
+        msg1_content += hints_ctx + "\n\n"
     msg1_content += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
 
     messages: list[dict] = [{"role": "user", "content": msg1_content}]
@@ -590,12 +588,15 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
 
     # ── Pass 1 ────────────────────────────────────────────────────────────────
     types_ctx = _build_types_context(db, detected_codes) if db is not None else ""
+    hints_ctx = _build_hints_context(db, detected_codes) if db is not None else ""
     msg1_content = (
         "Проанализируй ТЗ и извлеки все объекты. "
         "Вызови функцию extract_pir_entities.\n\n"
     )
     if types_ctx:
         msg1_content += types_ctx + "\n\n"
+    if hints_ctx:
+        msg1_content += hints_ctx + "\n\n"
     msg1_content += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
 
     messages: list[dict] = [{"role": "user", "content": msg1_content}]
