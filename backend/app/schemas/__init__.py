@@ -81,6 +81,7 @@ class ExtractedEntity(BaseModel):
     sbts_object_type_id: Optional[int] = None
     x_value: Optional[float] = None
     x_unit: str = ""
+    quantity: int = 1
     coefficients: list[CoefficientInput] = []
     notes: str = ""
     confidence: float = 0.0

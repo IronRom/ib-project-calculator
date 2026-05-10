@@ -183,6 +183,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         x_value        = float(entity.get("x_value") or 0.0)
         x_unit         = entity.get("x_unit", "")
         object_name    = entity.get("object_name", "")
+        qty            = max(1, int(entity.get("quantity") or 1))
 
         if not table_num:
             errors.append(f"{object_name}: не определена таблица СБЦП")
@@ -211,7 +212,8 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             x_calc = match.x_effective
 
         # Reference rows values are in тыс. руб. (base year 2001)
-        cost = (a + b * x_calc) * 1000
+        unit_cost = (a + b * x_calc) * 1000
+        cost = unit_cost * qty
 
         row_unit = row.x_unit or x_unit or ""
         row_num  = row.row_num or ""
@@ -235,6 +237,8 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             formula = _fmt_number(a_rub)
         if match.extrapolated and match.x_boundary is not None:
             formula += f" × МУ620 (X_эфф={x_calc:.4g})"
+        if qty > 1:
+            formula += f" × {qty} шт."
 
         positions.append({
             "num":           len(positions) + 1,
@@ -242,6 +246,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             "row_description": row.description or "",
             "unit":          row_unit,
             "quantity":      match.x_effective,
+            "item_count":    qty,
             "justification": justification,
             "formula":       formula,
             "cost":          round(cost, 2),
