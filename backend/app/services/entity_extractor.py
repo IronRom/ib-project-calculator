@@ -445,6 +445,30 @@ COEFF_TOOL_OPENAI = {
 
 # ── Shared pipeline ───────────────────────────────────────────────────────────
 
+def _propagate_gnb_x_to_diffuser(result: ExtractionResult) -> None:
+    """If a table-14 (рассеивающий выпуск) entity has no x_value but a ГНБ
+    коллектор (table 8) entity does, copy its x_value/x_unit.
+
+    This enforces the domain rule from hint sort_order=15 deterministically,
+    since the AI consistently misses it.
+    """
+    diffusers = [e for e in result.entities if e.sbts_table == 14 and e.x_value is None]
+    if not diffusers:
+        return
+    gnb_sources = [
+        e for e in result.entities
+        if e.sbts_table == 8 and e.x_value is not None and e.x_value > 0
+    ]
+    if not gnb_sources:
+        return
+    # Use the largest x_value among ГНБ коллектор entities (most likely the relevant one)
+    source = max(gnb_sources, key=lambda e: e.x_value)
+    for d in diffusers:
+        d.x_value = source.x_value
+        d.x_unit = source.x_unit or "м"
+        d.notes = (d.notes or "") + f"\n[авто] X={source.x_value} {source.x_unit} скопирован из ГНБ-коллектора (таблица 8)"
+
+
 def _fill_sbts_codes(result: ExtractionResult, db, detected_codes: list[str]) -> None:
     """Fill empty sbts_code by matching entity's sbts_table → book that owns it."""
     if not db or not detected_codes:
@@ -563,6 +587,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
     if not result:
         return ExtractionResult(entities=[], missing_data=["Не удалось извлечь данные из ТЗ"])
     _fill_sbts_codes(result, db, detected_codes)
+    _propagate_gnb_x_to_diffuser(result)
     if not result.entities or db is None:
         _validate_entities(result, tz_text)
         return result
@@ -713,6 +738,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
 
     result = ExtractionResult(**json.loads(tool_calls[0]["function"]["arguments"]))
     _fill_sbts_codes(result, db, detected_codes)
+    _propagate_gnb_x_to_diffuser(result)
     if not result.entities or db is None:
         _validate_entities(result, tz_text)
         return result
