@@ -91,6 +91,16 @@ def _match_row(
     if object_type_id is not None:
         q = q.filter(ReferenceRow.object_type_id == object_type_id)
     all_rows: list[ReferenceRow] = q.all()
+    # Fallback: type_id gave no rows → retry without type filter
+    if not all_rows and object_type_id is not None:
+        all_rows = (
+            db.query(ReferenceRow)
+            .filter(
+                ReferenceRow.book_version_id == book_version_id,
+                ReferenceRow.table_num == table_num,
+            )
+            .all()
+        )
     if not all_rows:
         return None
 
