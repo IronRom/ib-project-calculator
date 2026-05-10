@@ -442,6 +442,42 @@ COEFF_TOOL_OPENAI = {
     },
 }
 
+_RESOLVE_X_ITEM = {
+    "type": "object",
+    "required": ["entity_index", "x_value", "x_unit", "reason"],
+    "properties": {
+        "entity_index": {"type": "integer", "description": "0-based индекс позиции"},
+        "x_value": {"type": "number"},
+        "x_unit": {"type": "string"},
+        "reason": {"type": "string", "description": "Источник: цитата из ТЗ или ссылка на другую позицию"},
+    },
+}
+
+RESOLVE_X_TOOL = {
+    "name": "resolve_missing_x",
+    "description": "Уточнить x_value для позиций, где AI не смог его определить",
+    "input_schema": {
+        "type": "object",
+        "required": ["resolutions"],
+        "properties": {
+            "resolutions": {
+                "type": "array",
+                "description": "Только позиции, для которых X удалось определить. Пустой список если ничего.",
+                "items": _RESOLVE_X_ITEM,
+            }
+        },
+    },
+}
+
+RESOLVE_X_TOOL_OPENAI = {
+    "type": "function",
+    "function": {
+        "name": RESOLVE_X_TOOL["name"],
+        "description": RESOLVE_X_TOOL["description"],
+        "parameters": RESOLVE_X_TOOL["input_schema"],
+    },
+}
+
 
 # ── Shared pipeline ───────────────────────────────────────────────────────────
 
@@ -469,6 +505,46 @@ def _fill_sbts_codes(result: ExtractionResult, db, detected_codes: list[str]) ->
     for entity in result.entities:
         if not entity.sbts_code and entity.sbts_table and entity.sbts_table in table_to_code:
             entity.sbts_code = table_to_code[entity.sbts_table]
+
+
+def _build_resolve_x_context(result: ExtractionResult, tz_text: str, hints_ctx: str) -> str:
+    """Pass 3 context: entity list with null-x highlighted + hints + TZ."""
+    null_indices = [i for i, e in enumerate(result.entities) if e.x_value is None]
+    if not null_indices:
+        return ""
+    lines = [
+        "═══ УТОЧНЕНИЕ ПАРАМЕТРА X ═══\n",
+        "Анализ ТЗ уже выполнен. Ниже — все позиции с текущими X.",
+        "Для позиций «X=null» определи X из текста ТЗ или из параметров других позиций.",
+        "Если X не удаётся определить — оставь такие позиции без изменений.\n",
+        "Позиции (индекс, таблица, наименование, X):",
+    ]
+    for i, e in enumerate(result.entities):
+        x_str = f"{e.x_value} {e.x_unit}" if e.x_value is not None else "null ← ОПРЕДЕЛИТЬ"
+        lines.append(f"  [{i}] Таблица {e.sbts_table}: {e.object_name} | {x_str}")
+    if hints_ctx:
+        lines.append("\n" + hints_ctx)
+    lines.append("\n═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text)
+    lines.append("\nВызови функцию resolve_missing_x. Если X не удалось определить — resolutions=[].")
+    return "\n".join(lines)
+
+
+def _merge_resolved_x(result: ExtractionResult, resolutions: list[dict]) -> None:
+    for r in resolutions:
+        idx = r.get("entity_index", -1)
+        if not (0 <= idx < len(result.entities)):
+            continue
+        entity = result.entities[idx]
+        if entity.x_value is not None:
+            continue  # never overwrite AI-extracted value
+        x_val = r.get("x_value")
+        if x_val is None:
+            continue
+        entity.x_value = float(x_val)
+        entity.x_unit = r.get("x_unit") or entity.x_unit
+        reason = r.get("reason", "")
+        prefix = f"[pass 3] {reason}" if reason else "[pass 3]"
+        entity.notes = (prefix + "\n" + (entity.notes or "")).strip()
 
 
 def _merge_coefficients(result: ExtractionResult, assignments: list[dict]) -> None:
@@ -610,6 +686,22 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
             _merge_coefficients(result, block.input.get("assignments", []))
             break
 
+    # ── Pass 3 (optional): resolve x_value=null ───────────────────────────────
+    resolve_ctx = _build_resolve_x_context(result, tz_text, hints_ctx)
+    if resolve_ctx:
+        resp3 = client.messages.create(
+            model=settings.extraction_model,
+            max_tokens=1024,
+            system=system_block,
+            messages=[{"role": "user", "content": resolve_ctx}],
+            tools=[RESOLVE_X_TOOL],
+            tool_choice={"type": "tool", "name": "resolve_missing_x"},
+        )
+        for block in resp3.content:
+            if block.type == "tool_use" and block.name == "resolve_missing_x":
+                _merge_resolved_x(result, block.input.get("resolutions", []))
+                break
+
     _validate_entities(result, tz_text)
     return result
 
@@ -742,6 +834,23 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
             _merge_coefficients(result, assignments)
         except (json.JSONDecodeError, KeyError):
             pass  # truncated response — skip coefficients, return entities as-is
+
+    # ── Pass 3 (optional): resolve x_value=null ───────────────────────────────
+    resolve_ctx = _build_resolve_x_context(result, tz_text, hints_ctx)
+    if resolve_ctx:
+        data3 = await _call(
+            [{"role": "user", "content": resolve_ctx}],
+            [RESOLVE_X_TOOL_OPENAI],
+            "resolve_missing_x",
+            1024,
+        )
+        tool_calls3 = data3.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
+        if tool_calls3:
+            try:
+                resolutions = json.loads(tool_calls3[0]["function"]["arguments"]).get("resolutions", [])
+                _merge_resolved_x(result, resolutions)
+            except (json.JSONDecodeError, KeyError):
+                pass
 
     _validate_entities(result, tz_text)
     return result
