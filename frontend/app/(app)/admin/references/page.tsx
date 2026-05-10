@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { listReferences, activateReference, rollbackReference, exportReferenceExcel, importReferenceExcel, deleteReference, ReferenceBook } from '@/lib/api'
+import { listReferences, activateReference, rollbackReference, exportReferenceExcel, importReferenceExcel, deleteReference, listHints, createHint, updateHint, deleteHint, ReferenceBook, ExtractionHint, ExtractionHintIn } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
@@ -31,6 +31,7 @@ export default function AdminReferencesPage() {
   const [importing, setImporting] = useState<number | null>(null)
   const [parseState, setParseState] = useState<ParseState | null>(null)
   const [error, setError] = useState('')
+  const [expandedHintsId, setExpandedHintsId] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const importingBookId = useRef<number | null>(null)
   const esRef = useRef<EventSource | null>(null)
@@ -240,9 +241,23 @@ export default function AdminReferencesPage() {
                           {!book.is_active && (
                             <Button size="sm" variant="danger" onClick={() => handleDelete(book)}>Удалить</Button>
                           )}
+                          <Button
+                            size="sm"
+                            variant={expandedHintsId === book.id ? 'primary' : 'secondary'}
+                            onClick={() => setExpandedHintsId(expandedHintsId === book.id ? null : book.id)}
+                          >
+                            Условия
+                          </Button>
                         </div>
                       </td>
                     </tr>
+                    {expandedHintsId === book.id && (
+                      <tr key={`hints-${book.id}`}>
+                        <td colSpan={6} style={{ padding: 0, background: 'var(--bg-surface)' }}>
+                          <HintsPanel bookId={book.id} bookCode={book.code} onClose={() => setExpandedHintsId(null)} />
+                        </td>
+                      </tr>
+                    )}
                   )
                 })}
               </tbody>
@@ -252,5 +267,188 @@ export default function AdminReferencesPage() {
       </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </>
+  )
+}
+
+const EMPTY_HINT: ExtractionHintIn = {
+  trigger_condition: '',
+  implied_work: '',
+  hint_for_ai: '',
+  justification: '',
+  is_active: true,
+  sort_order: 0,
+}
+
+function HintsPanel({ bookId, bookCode, onClose }: { bookId: number; bookCode: string; onClose: () => void }) {
+  const [hints, setHints] = useState<ExtractionHint[]>([])
+  const [loading, setLoading] = useState(true)
+  const [editingId, setEditingId] = useState<number | 'new' | null>(null)
+  const [form, setForm] = useState<ExtractionHintIn>(EMPTY_HINT)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    listHints(bookId).then(setHints).finally(() => setLoading(false))
+  }, [bookId])
+
+  function startEdit(h: ExtractionHint) {
+    setEditingId(h.id)
+    const { id: _id, book_version_id: _bv, ...rest } = h
+    setForm(rest)
+    setError('')
+  }
+
+  function startNew() {
+    setEditingId('new')
+    setForm({ ...EMPTY_HINT, sort_order: hints.length * 10 })
+    setError('')
+  }
+
+  async function handleSave() {
+    setSaving(true); setError('')
+    try {
+      if (editingId === 'new') {
+        const h = await createHint(bookId, form)
+        setHints(prev => [...prev, h].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id))
+      } else {
+        const h = await updateHint(bookId, editingId as number, form)
+        setHints(prev => prev.map(x => x.id === h.id ? h : x))
+      }
+      setEditingId(null)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Ошибка сохранения')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(h: ExtractionHint) {
+    if (!confirm('Удалить условие извлечения?')) return
+    try {
+      await deleteHint(bookId, h.id)
+      setHints(prev => prev.filter(x => x.id !== h.id))
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Ошибка удаления')
+    }
+  }
+
+  const ta: React.CSSProperties = {
+    width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12,
+    background: 'var(--bg-surface)', border: '1px solid var(--border-default)',
+    borderRadius: 'var(--radius-sm)', color: 'var(--fg-1)', resize: 'vertical',
+    fontFamily: 'inherit', lineHeight: 1.5,
+  }
+
+  return (
+    <div style={{ padding: '16px 20px', borderTop: '1px solid var(--blue-500)', background: 'var(--bg-surface)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>
+          Условия извлечения — <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--blue-300)' }}>{bookCode}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {editingId === null && (
+            <Button size="sm" variant="primary" onClick={startNew}>+ Добавить</Button>
+          )}
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-3)', fontSize: 18, lineHeight: 1, padding: '0 4px' }}>×</button>
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ padding: '8px 12px', background: 'var(--status-danger-bg)', border: '1px solid var(--danger-500)', borderRadius: 'var(--radius-sm)', fontSize: 12, color: 'var(--danger-400)', marginBottom: 10 }}>
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ fontSize: 12, color: 'var(--fg-3)', padding: '8px 0' }}>Загрузка…</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+          {hints.map(h => editingId === h.id ? (
+            <HintForm key={h.id} form={form} setForm={setForm} saving={saving} onSave={handleSave} onCancel={() => setEditingId(null)} error={error} ta={ta} />
+          ) : (
+            <div key={h.id} style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-md)', padding: '10px 14px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+              <div style={{ minWidth: 32, textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', paddingTop: 2 }}>{h.sort_order}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-1)', marginBottom: 2 }}>{h.trigger_condition}</div>
+                <div style={{ fontSize: 12, color: 'var(--blue-300)' }}>→ {h.implied_work}</div>
+                {h.justification && (
+                  <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 4, fontStyle: 'italic' }}>{h.justification}</div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                {!h.is_active && <span style={{ fontSize: 10, padding: '2px 6px', background: 'var(--bg-raised)', borderRadius: 99, color: 'var(--fg-4)' }}>откл.</span>}
+                <Button size="sm" variant="secondary" onClick={() => startEdit(h)}>Ред.</Button>
+                <Button size="sm" variant="danger" onClick={() => handleDelete(h)}>✕</Button>
+              </div>
+            </div>
+          ))}
+
+          {editingId === 'new' && (
+            <HintForm form={form} setForm={setForm} saving={saving} onSave={handleSave} onCancel={() => setEditingId(null)} error={error} ta={ta} isNew />
+          )}
+
+          {hints.length === 0 && editingId === null && (
+            <div style={{ fontSize: 12, color: 'var(--fg-3)', padding: '8px 0' }}>Нет условий. Нажмите «+ Добавить» чтобы создать первое.</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function HintForm({ form, setForm, saving, onSave, onCancel, error: _error, ta, isNew }: {
+  form: ExtractionHintIn
+  setForm: React.Dispatch<React.SetStateAction<ExtractionHintIn>>
+  saving: boolean
+  onSave: () => void
+  onCancel: () => void
+  error: string
+  ta: React.CSSProperties
+  isNew?: boolean
+}) {
+  const f = (key: keyof ExtractionHintIn) => (
+    (e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
+      setForm(prev => ({ ...prev, [key]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value }))
+  )
+
+  return (
+    <div style={{ background: 'var(--bg-raised)', border: '1px solid var(--blue-500)', borderRadius: 'var(--radius-md)', padding: '12px 14px' }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--blue-300)', marginBottom: 10 }}>
+        {isNew ? 'Новое условие' : 'Редактирование'}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--fg-3)', display: 'block', marginBottom: 3 }}>Триггер (когда применяется)</label>
+          <textarea rows={2} value={form.trigger_condition} onChange={f('trigger_condition')} style={ta} />
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--fg-3)', display: 'block', marginBottom: 3 }}>Подразумеваемая работа</label>
+          <textarea rows={2} value={form.implied_work} onChange={f('implied_work')} style={ta} />
+        </div>
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ fontSize: 11, color: 'var(--fg-3)', display: 'block', marginBottom: 3 }}>Инструкция для AI (hint_for_ai) — инжектируется в контекст извлечения</label>
+        <textarea rows={4} value={form.hint_for_ai} onChange={f('hint_for_ai')} style={{ ...ta, fontFamily: 'var(--font-mono)', fontSize: 11 }} />
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ fontSize: 11, color: 'var(--fg-3)', display: 'block', marginBottom: 3 }}>Обоснование (показывается пользователю под объектом ПИР)</label>
+        <textarea rows={2} value={form.justification} onChange={f('justification')} style={ta} />
+      </div>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 10 }}>
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--fg-3)', display: 'block', marginBottom: 3 }}>Порядок сортировки</label>
+          <input type="number" value={form.sort_order} onChange={f('sort_order')} style={{ ...ta, width: 80, resize: 'none' }} />
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', marginTop: 12 }}>
+          <input type="checkbox" checked={form.is_active} onChange={f('is_active')} />
+          Активно
+        </label>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button size="sm" variant="primary" disabled={saving} onClick={onSave}>{saving ? 'Сохранение…' : 'Сохранить'}</Button>
+        <Button size="sm" variant="secondary" onClick={onCancel}>Отмена</Button>
+      </div>
+    </div>
   )
 }

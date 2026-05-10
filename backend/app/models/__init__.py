@@ -34,6 +34,26 @@ class BookCondition(Base):
     book = relationship("ReferenceBook")
 
 
+class BookExtractionHint(Base):
+    """Domain-specific extraction rules per reference book.
+
+    Stored in DB, managed by admins. Injected into pass-1 AI context.
+    justification shown under the corresponding PIR entity in results.
+    """
+    __tablename__ = "book_extraction_hints"
+
+    id = Column(Integer, primary_key=True, index=True)
+    book_version_id = Column(Integer, ForeignKey("reference_books.id"), nullable=False, index=True)
+    trigger_condition = Column(Text, nullable=False)  # "При наличии КНС (таблица 9)"
+    implied_work = Column(Text, nullable=False)        # "Рассеивающий выпуск (таблица 14)"
+    hint_for_ai = Column(Text, nullable=False)         # injected into AI context verbatim
+    justification = Column(Text, nullable=False)       # shown under entity in results UI
+    is_active = Column(Boolean, nullable=False, default=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+
+    book = relationship("ReferenceBook")
+
+
 class User(Base):
     __tablename__ = "users"
 

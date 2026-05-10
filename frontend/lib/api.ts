@@ -171,6 +171,37 @@ export function deleteReference(bookId: number) {
   return request<void>(`/admin/references/${bookId}`, { method: 'DELETE' })
 }
 
+// ── Extraction Hints ──────────────────────────────────────────────────────────
+
+export interface ExtractionHint {
+  id: number
+  book_version_id: number
+  trigger_condition: string
+  implied_work: string
+  hint_for_ai: string
+  justification: string
+  is_active: boolean
+  sort_order: number
+}
+
+export type ExtractionHintIn = Omit<ExtractionHint, 'id' | 'book_version_id'>
+
+export function listHints(bookId: number) {
+  return request<ExtractionHint[]>(`/admin/references/${bookId}/hints`)
+}
+
+export function createHint(bookId: number, data: ExtractionHintIn) {
+  return request<ExtractionHint>(`/admin/references/${bookId}/hints`, { method: 'POST', body: JSON.stringify(data) })
+}
+
+export function updateHint(bookId: number, hintId: number, data: ExtractionHintIn) {
+  return request<ExtractionHint>(`/admin/references/${bookId}/hints/${hintId}`, { method: 'PUT', body: JSON.stringify(data) })
+}
+
+export function deleteHint(bookId: number, hintId: number) {
+  return request<void>(`/admin/references/${bookId}/hints/${hintId}`, { method: 'DELETE' })
+}
+
 export function computeCalculation(projectId: number, calcId: number) {
   return request<CalculationResult>(`/projects/${projectId}/calculations/${calcId}/compute`, { method: 'POST' })
 }

@@ -34,8 +34,40 @@ def _build_book_list(db) -> str:
     return "\n".join(lines)
 
 
+def _build_hints_context(db, book_codes: list[str]) -> str:
+    """Extraction hints for detected books — injected after types in pass 1."""
+    from app.models import BookExtractionHint, ReferenceBook
+
+    books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
+    _norm = lambda s: re.sub(r'^(сбцп|сбц|мрр)\s+', '', s.strip(), flags=re.IGNORECASE).lower()
+    matched = [b for b in books if any(_norm(b.code) == _norm(c) or b.code == c for c in book_codes)]
+    if not matched:
+        matched = books
+
+    lines: list[str] = []
+    for book in matched:
+        hints = (
+            db.query(BookExtractionHint)
+            .filter(BookExtractionHint.book_version_id == book.id, BookExtractionHint.is_active == True)
+            .order_by(BookExtractionHint.sort_order)
+            .all()
+        )
+        if hints:
+            lines.append(f"\n═══ ДОПОЛНИТЕЛЬНЫЕ УСЛОВИЯ ИЗВЛЕЧЕНИЯ ({book.code}) ═══\n")
+            lines.append(
+                "Следующие правила обязательны. При их применении укажи justification "
+                "из правила в поле notes извлекаемой позиции.\n"
+            )
+            for h in hints:
+                lines.append(f"УСЛОВИЕ: {h.trigger_condition}")
+                lines.append(f"  → {h.hint_for_ai}")
+                lines.append(f"  Обоснование для notes: «{h.justification}»\n")
+
+    return "\n".join(lines)
+
+
 def _build_types_context(db, book_codes: list[str]) -> str:
-    """Pass 1: object types for the detected book(s) only."""
+    """Pass 1: object types + extraction hints for the detected book(s) only."""
     from app.models import BookObjectType, ReferenceBook, ReferenceRow
 
     books = (
@@ -177,6 +209,11 @@ def _build_conditions_context(db, entities: list[dict]) -> str:
                 row_hint = f" ({c.row_range})" if c.row_range else ""
                 lines.append(f"    • {c.condition_short}{row_hint}: {coeff_str} [key={c.coeff_key}]")
         lines.append("")
+
+    # Append extraction hints after types
+    hints_ctx = _build_hints_context(db, book_codes)
+    if hints_ctx:
+        lines.append(hints_ctx)
 
     return "\n".join(lines)
 

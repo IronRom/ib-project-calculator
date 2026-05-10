@@ -394,3 +394,78 @@ def _get_book(book_id: int, db: Session) -> ReferenceBook:
     if not book:
         raise HTTPException(status_code=404, detail="Справочник не найден")
     return book
+
+
+# ── Extraction Hints CRUD ────────────────────────────────────────────────────
+
+from app.models import BookExtractionHint  # noqa: E402
+from pydantic import BaseModel as _BM      # noqa: E402
+
+
+class HintIn(_BM):
+    trigger_condition: str
+    implied_work: str
+    hint_for_ai: str
+    justification: str
+    is_active: bool = True
+    sort_order: int = 0
+
+
+class HintOut(_BM):
+    id: int
+    book_version_id: int
+    trigger_condition: str
+    implied_work: str
+    hint_for_ai: str
+    justification: str
+    is_active: bool
+    sort_order: int
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/{book_id}/hints", response_model=List[HintOut])
+def list_hints(book_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    _get_book(book_id, db)
+    return (
+        db.query(BookExtractionHint)
+        .filter(BookExtractionHint.book_version_id == book_id)
+        .order_by(BookExtractionHint.sort_order, BookExtractionHint.id)
+        .all()
+    )
+
+
+@router.post("/{book_id}/hints", response_model=HintOut, status_code=201)
+def create_hint(book_id: int, body: HintIn, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    _get_book(book_id, db)
+    hint = BookExtractionHint(book_version_id=book_id, **body.model_dump())
+    db.add(hint)
+    db.commit()
+    db.refresh(hint)
+    return hint
+
+
+@router.put("/{book_id}/hints/{hint_id}", response_model=HintOut)
+def update_hint(book_id: int, hint_id: int, body: HintIn, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    hint = db.query(BookExtractionHint).filter(
+        BookExtractionHint.id == hint_id, BookExtractionHint.book_version_id == book_id
+    ).first()
+    if not hint:
+        raise HTTPException(status_code=404, detail="Подсказка не найдена")
+    for k, v in body.model_dump().items():
+        setattr(hint, k, v)
+    db.commit()
+    db.refresh(hint)
+    return hint
+
+
+@router.delete("/{book_id}/hints/{hint_id}", status_code=204)
+def delete_hint(book_id: int, hint_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    hint = db.query(BookExtractionHint).filter(
+        BookExtractionHint.id == hint_id, BookExtractionHint.book_version_id == book_id
+    ).first()
+    if not hint:
+        raise HTTPException(status_code=404, detail="Подсказка не найдена")
+    db.delete(hint)
+    db.commit()
