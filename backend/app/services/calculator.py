@@ -192,16 +192,19 @@ def _normalize_code(code: str) -> str:
 
 
 def _find_active_book(db: Session, sbts_code: str) -> Optional[ReferenceBook]:
-    """Find active book by code. Handles prefix variants on both sides (СБЦП/СБЦ/МРР)."""
+    """Find active book by code. Handles prefix variants on both sides (СБЦП/СБЦ/МРР).
+    Falls back to the single active book when code is empty or unmatched."""
+    active_books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
     if not sbts_code:
-        return None
+        return active_books[0] if len(active_books) == 1 else None
     query_norm = _normalize_code(sbts_code)
-    for book in db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all():
+    for book in active_books:
         if book.code.strip().lower() == sbts_code.strip().lower():
             return book  # exact
         if _normalize_code(book.code) == query_norm:
             return book  # prefix-normalized
-    return None
+    # Unmatched code — fall back to single active book
+    return active_books[0] if len(active_books) == 1 else None
 
 
 def _fmt_number(n: float) -> str:
