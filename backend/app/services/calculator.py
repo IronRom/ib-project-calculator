@@ -158,6 +158,48 @@ _PRICING_COEFFS = {"reconstruction", "overhaul"}   # always multiply (МУ №62
 _COMPLEX_COEFFS = {"asu", "seismic", "deepening", "fishery"}  # sum fractional parts
 
 
+def _resolve_coeff_values(
+    db: Session, book_id: int, table_num: int, coefficients: list[dict]
+) -> list[dict]:
+    """Replace AI flag-values (1.0) with actual coeff_min from book_conditions.
+
+    Lookup order: table-specific row first, then table=None (global). Uses coeff_min
+    as the conservative lower bound when a range is stored.
+    """
+    from app.models import BookCondition
+
+    resolved = []
+    for c in coefficients:
+        key = (c.get("name") or "").strip()
+        if not key:
+            continue
+        # table-specific
+        cond = (
+            db.query(BookCondition)
+            .filter(
+                BookCondition.book_version_id == book_id,
+                BookCondition.coeff_key == key,
+                BookCondition.table_num == table_num,
+            )
+            .first()
+        )
+        # global fallback
+        if cond is None:
+            cond = (
+                db.query(BookCondition)
+                .filter(
+                    BookCondition.book_version_id == book_id,
+                    BookCondition.coeff_key == key,
+                    BookCondition.table_num.is_(None),
+                )
+                .first()
+            )
+        if cond is None or cond.coeff_min is None:
+            continue  # no value in DB → skip (don't invent a number)
+        resolved.append({**c, "value": float(cond.coeff_min)})
+    return resolved
+
+
 def _apply_coefficients(coefficients: list[dict]) -> tuple[float, str]:
     """МУ №620 п.3.14: compute combined factor and formula label."""
     pricing = 1.0
@@ -251,8 +293,8 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         else:
             x_calc = match.x_effective
 
-        # МУ №620 п.3.14: apply coefficients
-        coefficients = entity.get("coefficients", [])
+        # МУ №620 п.3.14: apply coefficients (resolve AI flag→actual DB value first)
+        coefficients = _resolve_coeff_values(db, book.id, table_num, entity.get("coefficients", []))
         coeff_factor, coeff_label = _apply_coefficients(coefficients)
 
         # Reference rows values are in тыс. руб. (base year 2001)
