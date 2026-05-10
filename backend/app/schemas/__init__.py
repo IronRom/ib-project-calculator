@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ COEFF_TYPES = Literal["reconstruction", "overhaul", "asu", "deepening", "seismic
 
 class CoefficientInput(BaseModel):
     name: COEFF_TYPES
-    value: float = 1.0
+    value: float = Field(default=1.0, ge=0.5, le=3.0)
     reason: str = ""
 
 
