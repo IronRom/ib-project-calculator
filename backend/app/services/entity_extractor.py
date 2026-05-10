@@ -22,32 +22,48 @@ _STRIP_RANGE_SUFFIX = re.compile(
 
 # ── Context builders ──────────────────────────────────────────────────────────
 
-def _build_types_context(db) -> str:
-    """Pass 1 context: object types only — no coefficient conditions."""
+def _build_book_list(db) -> str:
+    """Step 0: one line per active book — code + official name."""
+    from app.models import ReferenceBook
+    books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
+    if not books:
+        return ""
+    lines = ["Активные справочники:"]
+    for b in books:
+        lines.append(f"  {b.code} — {b.official_name or b.code}")
+    return "\n".join(lines)
+
+
+def _build_types_context(db, book_codes: list[str]) -> str:
+    """Pass 1: object types for the detected book(s) only."""
     from app.models import BookObjectType, ReferenceBook, ReferenceRow
 
-    active_books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
-    if not active_books:
-        return ""
+    books = (
+        db.query(ReferenceBook)
+        .filter(ReferenceBook.is_active == True)
+        .all()
+    )
+    # Match by code (normalized: strip prefix variants)
+    _norm = lambda s: re.sub(r'^(сбцп|сбц|мрр)\s+', '', s.strip(), flags=re.IGNORECASE).lower()
+    matched = [b for b in books if any(_norm(b.code) == _norm(c) or b.code == c for c in book_codes)]
+    if not matched:
+        matched = books  # fallback: all books
 
-    lines = ["═══ ДОСТУПНЫЕ ТИПЫ ОБЪЕКТОВ В АКТИВНЫХ СПРАВОЧНИКАХ ═══\n"]
+    lines = ["═══ ДОСТУПНЫЕ ТИПЫ ОБЪЕКТОВ ═══\n"]
     lines.append(
         "Каждый тип — отдельная позиция сметы. "
-        "Если объект в ТЗ соответствует нескольким типам (КОС = биоочистка + доочистка + осадок) "
-        "— создай позицию для каждого.\n"
+        "Если объект соответствует нескольким типам — создай позицию для каждого.\n"
         "Для каждой позиции укажи sbts_object_type_id из списка ниже.\n"
     )
 
-    for book in active_books:
+    for book in matched:
         lines.append(f"{book.official_name or book.code} (код: {book.code}):")
-
         types = (
             db.query(BookObjectType)
             .filter(BookObjectType.book_version_id == book.id)
             .order_by(BookObjectType.table_num, BookObjectType.id)
             .all()
         )
-
         if types:
             for table_num, group in groupby(types, key=lambda t: t.table_num):
                 for t in group:
@@ -78,75 +94,61 @@ def _build_types_context(db) -> str:
                 if key in seen:
                     continue
                 seen.add(key)
-                unit_str = f" → {x_unit}" if x_unit else ""
-                lines.append(f"  Таблица {table_num}: {type_name}{unit_str}")
-
+                lines.append(f"  Таблица {table_num}: {type_name}{' → ' + x_unit if x_unit else ''}")
         lines.append("")
 
     return "\n".join(lines)
 
 
 def _build_conditions_context(db, entities: list[dict]) -> str:
-    """Pass 2 context: keyed coefficient conditions for only the tables used in pass 1.
-
-    Queries BookCondition filtered to (book_version_id, table_num) pairs
-    found in extracted entities. Also includes book-wide conditions (table_num=NULL).
-    Only conditions with coeff_key are included — those are the ones AI can assign.
-    """
+    """Pass 2: keyed coefficient conditions for only the tables used in pass 1."""
     from app.models import BookCondition, ReferenceBook
 
-    # Collect needed (book_version_id, table_num) pairs
-    needed: dict[int, set[Optional[int]]] = {}  # book_id → set of table_nums
+    needed: dict[int, set[int]] = {}  # book_id → set of table_nums
 
     for entity in entities:
         sbts_code = (entity.get("sbts_code") or "").strip()
         table_num = entity.get("sbts_table")
         if not sbts_code or not table_num:
             continue
-
         book = (
             db.query(ReferenceBook)
             .filter(ReferenceBook.is_active == True)
-            .filter(ReferenceBook.code.ilike(f"%{sbts_code.lstrip('СБЦП МРРсбцпмрр ').strip()}%"))
+            .filter(ReferenceBook.code == sbts_code)
+            .first()
+        ) or (
+            db.query(ReferenceBook)
+            .filter(ReferenceBook.is_active == True)
+            .filter(ReferenceBook.code.ilike(f"%{sbts_code[-8:]}%"))
             .first()
         )
         if not book:
-            # Try exact match
-            book = (
-                db.query(ReferenceBook)
-                .filter(ReferenceBook.is_active == True)
-                .filter(ReferenceBook.code == sbts_code)
-                .first()
-            )
-        if not book:
             continue
-
         needed.setdefault(book.id, set()).add(table_num)
-        needed[book.id].add(None)  # always include book-wide conditions
 
     if not needed:
         return ""
 
     lines = [
         "═══ КОЭФФИЦИЕНТЫ ДЛЯ ВЫЯВЛЕННЫХ ТАБЛИЦ ═══\n",
-        "Просмотри каждую позицию из предыдущего ответа и определи — "
-        "применим ли коэффициент на основе текста ТЗ. "
-        "Вызови функцию assign_coefficients.\n",
+        "Для каждой позиции из предыдущего ответа определи — применим ли коэффициент "
+        "на основе текста ТЗ. Вызови функцию assign_coefficients.\n",
     ]
 
     for book_id, table_nums in needed.items():
         book = db.get(ReferenceBook, book_id)
-        conditions = (
+
+        keyed_table = (
             db.query(BookCondition)
             .filter(
                 BookCondition.book_version_id == book_id,
-                BookCondition.table_num.in_([t for t in table_nums if t is not None]),
+                BookCondition.table_num.in_(list(table_nums)),
                 BookCondition.coeff_key.isnot(None),
             )
             .order_by(BookCondition.table_num)
             .all()
         )
-        book_wide = (
+        keyed_wide = (
             db.query(BookCondition)
             .filter(
                 BookCondition.book_version_id == book_id,
@@ -155,7 +157,7 @@ def _build_conditions_context(db, entities: list[dict]) -> str:
             )
             .all()
         )
-        all_conds = conditions + book_wide
+        all_conds = keyed_table + keyed_wide
         if not all_conds:
             continue
 
@@ -168,18 +170,12 @@ def _build_conditions_context(db, entities: list[dict]) -> str:
             label = f"Таблица {tnum}" if tnum is not None else "Все таблицы"
             lines.append(f"  {label}:")
             for c in by_table[tnum]:
-                if c.coeff_min is not None and c.coeff_max is not None:
-                    coeff_str = (
-                        f"×{c.coeff_min}"
-                        if c.coeff_min == c.coeff_max
-                        else f"×{c.coeff_min}–{c.coeff_max}"
-                    )
-                else:
-                    coeff_str = ""
+                coeff_str = (
+                    f"×{c.coeff_min}" if c.coeff_min == c.coeff_max
+                    else f"×{c.coeff_min}–{c.coeff_max}"
+                ) if c.coeff_min is not None else ""
                 row_hint = f" ({c.row_range})" if c.row_range else ""
-                lines.append(
-                    f"    • {c.condition_short}{row_hint}: {coeff_str} [key={c.coeff_key}]"
-                )
+                lines.append(f"    • {c.condition_short}{row_hint}: {coeff_str} [key={c.coeff_key}]")
         lines.append("")
 
     return "\n".join(lines)
@@ -259,10 +255,9 @@ _COEFF_ITEM = {
         "name": {
             "type": "string",
             "enum": ["reconstruction", "overhaul", "asu", "deepening", "seismic", "fishery"],
-            "description": "Тип коэффициента",
         },
-        "value": {"type": "number", "const": 1, "description": "Всегда 1 — признак применимости"},
-        "reason": {"type": "string", "description": "Цитата или ссылка из ТЗ"},
+        "value": {"type": "number", "const": 1},
+        "reason": {"type": "string"},
     },
 }
 
@@ -279,31 +274,17 @@ EXTRACTION_TOOL = {
                     "type": "object",
                     "required": ["category", "object_type", "object_name", "address"],
                     "properties": {
-                        "category": {
-                            "type": "string",
-                            "enum": ["new_construction", "reconstruction", "overhaul"],
-                        },
+                        "category": {"type": "string", "enum": ["new_construction", "reconstruction", "overhaul"]},
                         "object_type": {"type": "string"},
                         "object_name": {"type": "string"},
                         "address": {"type": "string"},
-                        "sbts_code": {"type": "string", "description": "Код СБЦП, например 81-2001-17"},
-                        "sbts_table": {"type": "integer", "description": "Номер таблицы СБЦП"},
-                        "sbts_object_type_id": {
-                            "type": "integer",
-                            "description": "ID типа объекта из списка [type_id=X] в справочнике — обязательно указывать если список доступен",
-                        },
-                        "x_value": {"type": "number", "description": "Параметр X для ОДНОГО объекта"},
+                        "sbts_code": {"type": "string"},
+                        "sbts_table": {"type": "integer"},
+                        "sbts_object_type_id": {"type": "integer"},
+                        "x_value": {"type": "number"},
                         "x_unit": {"type": "string"},
-                        "quantity": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "description": "Количество одинаковых объектов. По умолчанию 1.",
-                        },
-                        "coefficients": {
-                            "type": "array",
-                            "description": "Флаги применимых коэффициентов. value всегда 1.",
-                            "items": _COEFF_ITEM,
-                        },
+                        "quantity": {"type": "integer", "minimum": 1},
+                        "coefficients": {"type": "array", "items": _COEFF_ITEM},
                         "notes": {"type": "string"},
                         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     },
@@ -319,28 +300,20 @@ EXTRACTION_TOOL = {
 
 COEFF_TOOL = {
     "name": "assign_coefficients",
-    "description": (
-        "Присвоить применимые коэффициенты к позициям ПИР на основе условий справочника и текста ТЗ. "
-        "Указывай только позиции, где есть хотя бы один применимый коэффициент."
-    ),
+    "description": "Присвоить применимые коэффициенты к позициям ПИР на основе условий справочника и текста ТЗ.",
     "input_schema": {
         "type": "object",
         "required": ["assignments"],
         "properties": {
             "assignments": {
                 "type": "array",
+                "description": "Только позиции с хотя бы одним применимым коэффициентом.",
                 "items": {
                     "type": "object",
                     "required": ["entity_index", "coefficients"],
                     "properties": {
-                        "entity_index": {
-                            "type": "integer",
-                            "description": "0-based индекс позиции из предыдущего ответа",
-                        },
-                        "coefficients": {
-                            "type": "array",
-                            "items": _COEFF_ITEM,
-                        },
+                        "entity_index": {"type": "integer", "description": "0-based индекс позиции"},
+                        "coefficients": {"type": "array", "items": _COEFF_ITEM},
                     },
                 },
             }
@@ -348,7 +321,6 @@ COEFF_TOOL = {
     },
 }
 
-# OpenAI-compatible wrappers for OpenRouter
 EXTRACTION_TOOL_OPENAI = {
     "type": "function",
     "function": {
@@ -358,20 +330,19 @@ EXTRACTION_TOOL_OPENAI = {
     },
 }
 
+COEFF_TOOL_OPENAI = {
+    "type": "function",
+    "function": {
+        "name": COEFF_TOOL["name"],
+        "description": COEFF_TOOL["description"],
+        "parameters": COEFF_TOOL["input_schema"],
+    },
+}
 
-# ── Extraction functions ──────────────────────────────────────────────────────
 
-def _user_msg_1(text: str, db) -> str:
-    types_ctx = _build_types_context(db) if db is not None else ""
-    msg = "Проанализируй следующее техническое задание и извлеки все объекты:\n\n"
-    if types_ctx:
-        msg += types_ctx + "\n\n"
-    msg += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + text[: settings.max_tz_chars]
-    return msg
-
+# ── Shared pipeline ───────────────────────────────────────────────────────────
 
 def _merge_coefficients(result: ExtractionResult, assignments: list[dict]) -> None:
-    """Merge pass-2 coefficient assignments into pass-1 entities (no duplicates by name)."""
     for assignment in assignments:
         idx = assignment.get("entity_index", -1)
         if not (0 <= idx < len(result.entities)):
@@ -388,22 +359,66 @@ def _merge_coefficients(result: ExtractionResult, assignments: list[dict]) -> No
                     pass
 
 
+def _detect_books_from_text(tz_text: str) -> list[str]:
+    """Fast regex: find СБЦП/МРР codes explicitly mentioned in TZ text."""
+    pattern = re.compile(
+        r'\b(?:СБЦП|СБЦ|МРР)\s*[\d\-\.]+(?:\-\d+)*',
+        re.IGNORECASE,
+    )
+    return list(dict.fromkeys(m.group(0).strip() for m in pattern.finditer(tz_text)))
+
+
+# ── Anthropic three-pass ──────────────────────────────────────────────────────
+
 async def extract_entities(text: str, db=None) -> ExtractionResult:
-    """Two-pass extraction (Anthropic):
-    Pass 1 — object types context → entities with sbts_table.
-    Pass 2 — conditions for those tables → coefficient assignments merged in.
+    """Three-pass extraction (Anthropic):
+    Step 0 — full TZ + book list → detect applicable book(s).
+    Pass 1 — TZ (cached) + types for detected book → entities.
+    Pass 2 — conditions for extracted table_nums → coefficients merged in.
     """
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
+    tz_text = text[: settings.max_tz_chars]
     system_block = [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
-    user_msg_1 = _user_msg_1(text, db)
 
-    # ── Pass 1 ────────────────────────────────────────────────────────────────
+    # ── Step 0: book detection ────────────────────────────────────────────────
+    detected_codes: list[str] = []
+
+    if db is not None:
+        # Try regex first (free)
+        detected_codes = _detect_books_from_text(tz_text)
+
+        if not detected_codes:
+            book_list = _build_book_list(db)
+            if book_list:
+                step0_msg = (
+                    "Определи, какой справочник (один или несколько) применим к данному ТЗ.\n"
+                    "Ответь ТОЛЬКО кодами через запятую, без пояснений. Пример: СБЦП 81-2001-17\n\n"
+                    f"{book_list}\n\n"
+                    "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
+                )
+                resp0 = client.messages.create(
+                    model=settings.extraction_model,
+                    max_tokens=100,
+                    system=system_block,
+                    messages=[{"role": "user", "content": step0_msg}],
+                )
+                raw = resp0.content[0].text.strip() if resp0.content else ""
+                detected_codes = [c.strip() for c in raw.split(",") if c.strip()]
+
+    # ── Pass 1: extract entities ──────────────────────────────────────────────
+    types_ctx = _build_types_context(db, detected_codes) if db is not None else ""
+    msg1_content = "Проанализируй ТЗ и извлеки все объекты:\n\n"
+    if types_ctx:
+        msg1_content += types_ctx + "\n\n"
+    msg1_content += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
+
+    messages: list[dict] = [{"role": "user", "content": msg1_content}]
+
     resp1 = client.messages.create(
         model=settings.extraction_model,
         max_tokens=4096,
         system=system_block,
-        messages=[{"role": "user", "content": user_msg_1}],
+        messages=messages,
         tools=[EXTRACTION_TOOL],
         tool_choice={"type": "tool", "name": "extract_pir_entities"},
     )
@@ -419,22 +434,24 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
     if not result.entities or db is None:
         return result
 
-    # ── Pass 2: conditions for extracted tables only ───────────────────────────
+    # ── Pass 2: assign coefficients ───────────────────────────────────────────
     entities_dicts = [e.model_dump() for e in result.entities]
     conditions_ctx = _build_conditions_context(db, entities_dicts)
 
     if not conditions_ctx:
-        return result  # no keyed conditions for these tables — skip pass 2
+        return result
+
+    messages = [
+        {"role": "user", "content": msg1_content},       # TZ in cache
+        {"role": "assistant", "content": resp1.content},  # pass 1 result
+        {"role": "user", "content": conditions_ctx},
+    ]
 
     resp2 = client.messages.create(
         model=settings.extraction_model,
         max_tokens=1024,
-        system=system_block,  # same system → prompt cache hit on TZ text
-        messages=[
-            {"role": "user", "content": user_msg_1},   # cached
-            {"role": "assistant", "content": resp1.content},  # pass 1 result
-            {"role": "user", "content": conditions_ctx},
-        ],
+        system=system_block,
+        messages=messages,
         tools=[COEFF_TOOL],
         tool_choice={"type": "tool", "name": "assign_coefficients"},
     )
@@ -447,43 +464,83 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
     return result
 
 
+# ── OpenRouter three-pass ─────────────────────────────────────────────────────
+
 async def extract_entities_openrouter(text: str, model_id: str, db=None) -> ExtractionResult:
-    """Single-pass extraction via OpenRouter (no pass-2 coefficient verification)."""
-    types_ctx = _build_types_context(db) if db is not None else ""
-    user_content = (
-        "Проанализируй следующее техническое задание и извлеки все объекты. "
-        "Обязательно вызови функцию extract_pir_entities с результатами.\n\n"
+    """Three-pass extraction via OpenRouter (OpenAI-compatible multi-turn)."""
+    tz_text = text[: settings.max_tz_chars]
+
+    async def _call(messages: list[dict], tools: list, tool_name: str, max_tokens: int) -> dict:
+        payload = {
+            "model": model_id,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+            "tools": tools,
+            "tool_choice": {"type": "function", "function": {"name": tool_name}},
+        }
+        async with httpx.AsyncClient(timeout=180) as http:
+            resp = await http.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {settings.openrouter_api_key}",
+                    "HTTP-Referer": "https://ib-pir-calculator.ru",
+                    "X-Title": "IB PIR Calculator",
+                },
+            )
+            resp.raise_for_status()
+        return resp.json()
+
+    async def _call_plain(messages: list[dict], max_tokens: int) -> str:
+        payload = {
+            "model": model_id,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+        }
+        async with httpx.AsyncClient(timeout=60) as http:
+            resp = await http.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {settings.openrouter_api_key}",
+                    "HTTP-Referer": "https://ib-pir-calculator.ru",
+                    "X-Title": "IB PIR Calculator",
+                },
+            )
+            resp.raise_for_status()
+        data = resp.json()
+        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+    # ── Step 0: book detection ────────────────────────────────────────────────
+    detected_codes: list[str] = []
+    if db is not None:
+        detected_codes = _detect_books_from_text(tz_text)
+        if not detected_codes:
+            book_list = _build_book_list(db)
+            if book_list:
+                step0_content = (
+                    "Определи, какой справочник применим к данному ТЗ.\n"
+                    "Ответь ТОЛЬКО кодами через запятую, без пояснений.\n\n"
+                    f"{book_list}\n\n"
+                    "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
+                )
+                raw = await _call_plain([{"role": "user", "content": step0_content}], max_tokens=100)
+                detected_codes = [c.strip() for c in raw.split(",") if c.strip()]
+
+    # ── Pass 1 ────────────────────────────────────────────────────────────────
+    types_ctx = _build_types_context(db, detected_codes) if db is not None else ""
+    msg1_content = (
+        "Проанализируй ТЗ и извлеки все объекты. "
+        "Вызови функцию extract_pir_entities.\n\n"
     )
     if types_ctx:
-        user_content += types_ctx + "\n\n"
-    user_content += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + text[: settings.max_tz_chars]
+        msg1_content += types_ctx + "\n\n"
+    msg1_content += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
 
-    payload = {
-        "model": model_id,
-        "max_tokens": 4096,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
-        "tools": [EXTRACTION_TOOL_OPENAI],
-    }
+    messages: list[dict] = [{"role": "user", "content": msg1_content}]
+    data1 = await _call(messages, [EXTRACTION_TOOL_OPENAI], "extract_pir_entities", 4096)
 
-    async with httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {settings.openrouter_api_key}",
-                "HTTP-Referer": "https://ib-pir-calculator.ru",
-                "X-Title": "IB PIR Calculator",
-            },
-        )
-        resp.raise_for_status()
-
-    data = resp.json()
-    tool_calls = (
-        data.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
-    )
+    tool_calls = data1.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
     if not tool_calls:
         return ExtractionResult(
             entities=[],
@@ -493,5 +550,28 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
             overall_confidence=0.0,
         )
 
-    args = json.loads(tool_calls[0]["function"]["arguments"])
-    return ExtractionResult(**args)
+    result = ExtractionResult(**json.loads(tool_calls[0]["function"]["arguments"]))
+    if not result.entities or db is None:
+        return result
+
+    # ── Pass 2 ────────────────────────────────────────────────────────────────
+    entities_dicts = [e.model_dump() for e in result.entities]
+    conditions_ctx = _build_conditions_context(db, entities_dicts)
+    if not conditions_ctx:
+        return result
+
+    assistant_msg = data1["choices"][0]["message"]
+    messages = [
+        {"role": "user", "content": msg1_content},
+        {"role": "assistant", "content": assistant_msg.get("content") or "", "tool_calls": assistant_msg.get("tool_calls", [])},
+        {"role": "tool", "tool_call_id": tool_calls[0]["id"], "content": tool_calls[0]["function"]["arguments"]},
+        {"role": "user", "content": conditions_ctx},
+    ]
+
+    data2 = await _call(messages, [COEFF_TOOL_OPENAI], "assign_coefficients", 1024)
+    tool_calls2 = data2.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
+    if tool_calls2:
+        assignments = json.loads(tool_calls2[0]["function"]["arguments"]).get("assignments", [])
+        _merge_coefficients(result, assignments)
+
+    return result
