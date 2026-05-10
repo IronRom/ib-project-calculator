@@ -498,7 +498,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
 
     resp2 = client.messages.create(
         model=settings.extraction_model,
-        max_tokens=1024,
+        max_tokens=2048,
         system=system_block,
         messages=messages,
         tools=[COEFF_TOOL],
@@ -630,10 +630,13 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
         {"role": "user", "content": conditions_ctx},
     ]
 
-    data2 = await _call(messages, [COEFF_TOOL_OPENAI], "assign_coefficients", 1024)
+    data2 = await _call(messages, [COEFF_TOOL_OPENAI], "assign_coefficients", 2048)
     tool_calls2 = data2.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
     if tool_calls2:
-        assignments = json.loads(tool_calls2[0]["function"]["arguments"]).get("assignments", [])
-        _merge_coefficients(result, assignments)
+        try:
+            assignments = json.loads(tool_calls2[0]["function"]["arguments"]).get("assignments", [])
+            _merge_coefficients(result, assignments)
+        except (json.JSONDecodeError, KeyError):
+            pass  # truncated response — skip coefficients, return entities as-is
 
     return result
