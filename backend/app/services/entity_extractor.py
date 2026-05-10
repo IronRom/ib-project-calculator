@@ -445,6 +445,31 @@ COEFF_TOOL_OPENAI = {
 
 # ── Shared pipeline ───────────────────────────────────────────────────────────
 
+def _fill_sbts_codes(result: ExtractionResult, db, detected_codes: list[str]) -> None:
+    """Fill empty sbts_code by matching entity's sbts_table → book that owns it."""
+    if not db or not detected_codes:
+        return
+    from app.models import ReferenceBook, ReferenceRow
+
+    _norm = lambda s: re.sub(r'^(сбцп|сбц|мрр)\s+', '', s.strip(), flags=re.IGNORECASE).lower()
+    active = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
+    matched_books = [b for b in active if any(_norm(b.code) == _norm(c) or b.code == c for c in detected_codes)]
+    if not matched_books:
+        matched_books = active
+
+    # table_num → canonical book code (first match wins)
+    table_to_code: dict[int, str] = {}
+    for book in matched_books:
+        tables = {r.table_num for r in db.query(ReferenceRow.table_num)
+                  .filter(ReferenceRow.book_version_id == book.id).all()}
+        for t in tables:
+            table_to_code.setdefault(t, book.code)
+
+    for entity in result.entities:
+        if not entity.sbts_code and entity.sbts_table and entity.sbts_table in table_to_code:
+            entity.sbts_code = table_to_code[entity.sbts_table]
+
+
 def _merge_coefficients(result: ExtractionResult, assignments: list[dict]) -> None:
     for assignment in assignments:
         idx = assignment.get("entity_index", -1)
@@ -537,6 +562,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
 
     if not result:
         return ExtractionResult(entities=[], missing_data=["Не удалось извлечь данные из ТЗ"])
+    _fill_sbts_codes(result, db, detected_codes)
     if not result.entities or db is None:
         _validate_entities(result, tz_text)
         return result
@@ -686,6 +712,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
         )
 
     result = ExtractionResult(**json.loads(tool_calls[0]["function"]["arguments"]))
+    _fill_sbts_codes(result, db, detected_codes)
     if not result.entities or db is None:
         _validate_entities(result, tz_text)
         return result
