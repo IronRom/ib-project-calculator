@@ -196,34 +196,38 @@ def _resolve_coeff_values(
             )
         if cond is None or cond.coeff_min is None:
             continue  # no value in DB → skip (don't invent a number)
-        resolved.append({**c, "value": float(cond.coeff_min)})
+        resolved.append({
+            **c,
+            "value": float(cond.coeff_min),
+            "condition_short": cond.condition_short or "",
+            "_table_num": cond.table_num,  # for paragraph ref derivation
+        })
     return resolved
 
 
-def _apply_coefficients(coefficients: list[dict]) -> tuple[float, str]:
-    """МУ №620 п.3.14: compute combined factor and formula label."""
+def _apply_coefficients(coefficients: list[dict]) -> tuple[float, list[tuple[str, float, str]]]:
+    """МУ №620 п.3.14: compute combined factor + list of (name, value, condition_short).
+
+    Returns the factor and the resolved coefficient list for justification building.
+    """
     pricing = 1.0
     complex_parts: list[tuple[str, float]] = []
+    applied: list[tuple[str, float, str]] = []  # (name, resolved_value, condition_short)
 
     for c in coefficients:
         name = (c.get("name") or "").strip()
         value = float(c.get("value") or 1.0)
+        short = c.get("condition_short", "")
         if name in _PRICING_COEFFS and value != 1.0:
             pricing *= value
+            applied.append((name, value, short))
         elif name in _COMPLEX_COEFFS and value > 1.0:
             complex_parts.append((name, value - 1.0))
+            applied.append((name, value, short))
 
     complex_factor = 1.0 + sum(v for _, v in complex_parts)
     combined = pricing * complex_factor
-
-    parts: list[str] = []
-    if pricing != 1.0:
-        parts.append(f"×{pricing:.3g}")
-    if complex_parts:
-        detail = "+".join(f"{v:.3g}({n})" for n, v in complex_parts)
-        parts.append(f"×{complex_factor:.3g}[1+{detail}]")
-
-    return combined, " ".join(parts)
+    return combined, applied
 
 
 _CODE_PREFIX = re.compile(r'^(сбцп|сбц|мрр)\s+', re.IGNORECASE)
@@ -247,9 +251,19 @@ def _find_active_book(db: Session, sbts_code: str) -> Optional[ReferenceBook]:
 
 
 def _fmt_number(n: float) -> str:
+    """Space-separated thousands, period decimal — for justification text."""
     if n == int(n):
         return f"{int(n):,}".replace(",", " ")
     return f"{n:,.2f}".replace(",", " ")
+
+
+def _fmt_ru(n: float) -> str:
+    """Compact Russian format for formula: no spaces, comma decimal."""
+    if n == int(n):
+        return str(int(n))
+    # Up to 5 significant digits, comma decimal, no trailing zeros
+    s = f"{n:.5g}".replace(".", ",")
+    return s
 
 
 def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
@@ -295,7 +309,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
 
         # МУ №620 п.3.14: apply coefficients (resolve AI flag→actual DB value first)
         coefficients = _resolve_coeff_values(db, book.id, table_num, entity.get("coefficients", []))
-        coeff_factor, coeff_label = _apply_coefficients(coefficients)
+        coeff_factor, applied_coeffs = _apply_coefficients(coefficients)
 
         # Reference rows values are in тыс. руб. (base year 2001)
         unit_cost = (a + b * x_calc) * 1000
@@ -304,9 +318,10 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         row_unit = row.x_unit or x_unit or ""
         row_num  = row.row_num or ""
 
-        justification = f"{book.code}, Таблица №{table_num}"
+        # ── Justification (обоснование) ───────────────────────────────────────
+        justification = f"{book.code}, табл. {table_num}"
         if row_num:
-            justification += f" {row_num}"
+            justification += f", {row_num}"
         if row.x_min is not None and row.x_max is not None:
             justification += f" (свыше {_fmt_number(float(row.x_min))} до {_fmt_number(float(row.x_max))})"
         elif row.x_max is not None:
@@ -315,19 +330,23 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             justification += f" (свыше {_fmt_number(float(row.x_min))})"
         if match.note:
             justification += f" [{match.note}]"
+        # Coefficient references: п. 2.{table_num} (condition text К=value)
+        for _name, _val, _short in applied_coeffs:
+            para = f"п. 2.{table_num}" if table_num else "п. 1"
+            justification += f"; {para} ({_short} К={_fmt_ru(_val)})"
 
+        # ── Formula (расчёт стоимости) ────────────────────────────────────────
         a_rub, b_rub = a * 1000, b * 1000
         if b:
-            formula = f"({_fmt_number(a_rub)} + {_fmt_number(b_rub)} × {match.x_effective})"
+            formula = f"({_fmt_ru(a_rub)}+{_fmt_ru(b_rub)}*{_fmt_ru(match.x_effective)})"
         else:
-            formula = _fmt_number(a_rub)
+            formula = _fmt_ru(a_rub)
         if match.extrapolated and match.x_boundary is not None:
-            formula += f" × МУ620 (X_эфф={x_calc:.4g})"
-        if coeff_label:
-            formula += f" {coeff_label}"
-            justification += f" | МУ №620 п.3.14: {coeff_label}"
+            formula += f"×МУ620(X={_fmt_ru(x_calc)})"
+        if coeff_factor != 1.0:
+            formula += f"*{_fmt_ru(coeff_factor)}"
         if qty > 1:
-            formula += f" × {qty} шт."
+            formula += f"*{qty}"
 
         positions.append({
             "num":           len(positions) + 1,
