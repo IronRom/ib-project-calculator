@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "updatedAt": "2026-05-08T21:52:02.564Z",
+  "entries": {
+    "memory:memory/2026-05-09.md:1:17": {
+      "key": "memory:memory/2026-05-09.md:1:17",
+      "path": "memory/2026-05-09.md",
+      "startLine": 1,
+      "endLine": 17,
+      "source": "memory",
+      "snippet": "# 2026-05-09 ## Heartbeat checks - 03:33 AM (Asia/Bangkok): Heartbeat poll received. Services running: backend, db, frontend (docker-compose) - HEARTBEAT.md is empty (skip heartbeat API calls per file instruction) ## Project status - IB Calculator PIR project services are up and running - Backend: port 8000 - Frontend: port 3001 - Database: port 5432 - All containers healthy ## Notes - Created memory directory structure - MEMORY.md does not exist yet - should be created for long-term memory - HEARTBEAT.md explicitly says to skip heartbeat API calls when empty",
+      "recallCount": 1,
+      "dailyCount": 0,
+      "groundedCount": 0,
+      "totalScore": 0.642907600787311,
+      "maxScore": 0.642907600787311,
+      "firstRecalledAt": "2026-05-08T21:52:02.564Z",
+      "lastRecalledAt": "2026-05-08T21:52:02.564Z",
+      "queryHashes": [
+        "521d375639e6"
+      ],
+      "recallDays": [
+        "2026-05-09"
+      ],
+      "conceptTags": [
+        "asia/bangkok",
+        "docker-compose",
+        "heartbeat.md",
+        "memory.md",
+        "long-term",
+        "heartbeat",
+        "checks",
+        "asia"
+      ]
+    }
+  }
+}

@@ -20,11 +20,8 @@ _STRIP_RANGE_SUFFIX = re.compile(
 
 
 def _build_reference_context(db) -> str:
-    """Build a prompt section listing unique object types from all active reference books.
-    Uses book_object_types if populated (with stable IDs for AI to return),
-    otherwise falls back to deriving types from reference_rows descriptions.
-    """
-    from app.models import BookObjectType, ReferenceBook, ReferenceRow
+    """Build prompt section: object types + coefficient conditions from active reference books."""
+    from app.models import BookCondition, BookObjectType, ReferenceBook, ReferenceRow
 
     active_books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
     if not active_books:
@@ -48,16 +45,24 @@ def _build_reference_context(db) -> str:
             .all()
         )
 
+        table_conditions: dict[int | None, list[BookCondition]] = {}
+        for cond in db.query(BookCondition).filter(BookCondition.book_version_id == book.id).all():
+            table_conditions.setdefault(cond.table_num, []).append(cond)
+
         if types:
-            for t in types:
-                sample = (
-                    db.query(ReferenceRow.x_unit)
-                    .filter(ReferenceRow.object_type_id == t.id, ReferenceRow.x_unit.isnot(None))
-                    .first()
-                )
-                unit = sample[0] if sample else ""
-                unit_str = f" → {unit}" if unit else ""
-                lines.append(f"  Таблица {t.table_num} [type_id={t.id}]: {t.name}{unit_str}")
+            # Group by table_num so conditions appear once per table
+            from itertools import groupby
+            for table_num, group in groupby(types, key=lambda t: t.table_num):
+                for t in group:
+                    sample = (
+                        db.query(ReferenceRow.x_unit)
+                        .filter(ReferenceRow.object_type_id == t.id, ReferenceRow.x_unit.isnot(None))
+                        .first()
+                    )
+                    unit = sample[0] if sample else ""
+                    unit_str = f" → {unit}" if unit else ""
+                    lines.append(f"  Таблица {table_num} [type_id={t.id}]: {t.name}{unit_str}")
+                _append_conditions(lines, table_conditions.get(table_num, []))
         else:
             # Fallback: derive from reference_rows when book_object_types not yet populated
             rows = (
@@ -67,6 +72,7 @@ def _build_reference_context(db) -> str:
                 .all()
             )
             seen: set[tuple] = set()
+            last_table = None
             for table_num, description, x_unit in rows:
                 if not description:
                     continue
@@ -80,10 +86,36 @@ def _build_reference_context(db) -> str:
                 seen.add(key)
                 unit_str = f" → {x_unit}" if x_unit else ""
                 lines.append(f"  Таблица {table_num}: {type_name}{unit_str}")
+                if table_num != last_table:
+                    _append_conditions(lines, table_conditions.get(table_num, []))
+                    last_table = table_num
+
+        # Book-wide conditions
+        book_wide = table_conditions.get(None, [])
+        if book_wide:
+            lines.append("  Общие коэффициенты (применимы ко всем таблицам):")
+            _append_conditions(lines, book_wide, indent="    ")
 
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _append_conditions(lines: list[str], conditions: list, indent: str = "    ") -> None:
+    if not conditions:
+        return
+    lines.append(f"{indent}Коэффициенты:")
+    for c in conditions:
+        if c.coeff_min is not None and c.coeff_max is not None:
+            if c.coeff_min == c.coeff_max:
+                coeff_str = f"×{c.coeff_min}"
+            else:
+                coeff_str = f"×{c.coeff_min}–{c.coeff_max}"
+        else:
+            coeff_str = ""
+        key_hint = f" [key={c.coeff_key}]" if c.coeff_key else ""
+        row_hint = f" ({c.row_range})" if c.row_range else ""
+        lines.append(f"{indent}  • {c.condition_short}{row_hint}: {coeff_str}{key_hint}")
 
 SYSTEM_PROMPT = """Ты опытный сметчик ПИР (проектно-изыскательских работ) в России.
 Твоя задача — извлечь из Технического задания (ТЗ) все объекты и их параметры для расчёта стоимости ПИР по активному справочнику.

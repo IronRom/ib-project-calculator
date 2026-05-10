@@ -10,6 +10,30 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
+class BookCondition(Base):
+    """Coefficient conditions extracted from a reference book.
+
+    table_num=None means the condition applies book-wide.
+    row_range is a free-text descriptor, e.g. "п.1-9" or "п.13-21".
+    effect_type: "multiplier_range" | "flag" | "additive"
+    coeff_min/coeff_max: the coefficient value range (equal when exact).
+    """
+    __tablename__ = "book_conditions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    book_version_id = Column(Integer, ForeignKey("reference_books.id"), nullable=False, index=True)
+    table_num = Column(Integer, nullable=True, index=True)   # NULL = book-wide
+    row_range = Column(String(50), nullable=True)            # "п.1-9", "п.13+", etc.
+    condition_short = Column(Text, nullable=False)           # one-line description for AI context
+    condition_text_full = Column(Text, nullable=True)        # verbatim from PDF
+    effect_type = Column(String(30), nullable=False, default="multiplier_range")
+    coeff_min = Column(Numeric(8, 4), nullable=True)
+    coeff_max = Column(Numeric(8, 4), nullable=True)
+    coeff_key = Column(String(30), nullable=True)            # "asu", "seismic", "reconstruction", etc.
+
+    book = relationship("ReferenceBook")
+
+
 class User(Base):
     __tablename__ = "users"
 
