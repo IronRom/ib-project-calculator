@@ -83,9 +83,9 @@ class ExtractedEntity(BaseModel):
     x_unit: str = ""
     quantity: int = 1
     coefficients: list[CoefficientInput] = []
-    notes: str = ""
+    notes: Optional[str] = ""
     confidence: float = 0.0
-    tz_quote: str = ""         # verbatim excerpt from TZ that justifies this entity
+    tz_quote: Optional[str] = ""         # verbatim excerpt from TZ that justifies this entity
 
 
 class ExtractionResult(BaseModel):
