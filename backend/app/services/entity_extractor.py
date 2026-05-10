@@ -441,10 +441,24 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
     if not conditions_ctx:
         return result
 
+    # Find tool_use id from pass 1 to satisfy Anthropic's tool_result requirement
+    tool_use_id = next(
+        (b.id for b in resp1.content if b.type == "tool_use"),
+        None,
+    )
+    pass2_user_content: list = []
+    if tool_use_id:
+        pass2_user_content.append({
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": "OK",
+        })
+    pass2_user_content.append({"type": "text", "text": conditions_ctx})
+
     messages = [
-        {"role": "user", "content": msg1_content},       # TZ in cache
-        {"role": "assistant", "content": resp1.content},  # pass 1 result
-        {"role": "user", "content": conditions_ctx},
+        {"role": "user", "content": msg1_content},
+        {"role": "assistant", "content": resp1.content},
+        {"role": "user", "content": pass2_user_content},
     ]
 
     resp2 = client.messages.create(
@@ -470,6 +484,20 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
     """Three-pass extraction via OpenRouter (OpenAI-compatible multi-turn)."""
     tz_text = text[: settings.max_tz_chars]
 
+    def _or_headers() -> dict:
+        return {
+            "Authorization": f"Bearer {settings.openrouter_api_key}",
+            "HTTP-Referer": "https://ib-pir-calculator.ru",
+            "X-Title": "IB PIR Calculator",
+        }
+
+    def _or_error(resp: httpx.Response) -> str:
+        try:
+            body = resp.json()
+            return body.get("error", {}).get("message") or resp.text
+        except Exception:
+            return resp.text
+
     async def _call(messages: list[dict], tools: list, tool_name: str, max_tokens: int) -> dict:
         payload = {
             "model": model_id,
@@ -482,13 +510,10 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
             resp = await http.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 json=payload,
-                headers={
-                    "Authorization": f"Bearer {settings.openrouter_api_key}",
-                    "HTTP-Referer": "https://ib-pir-calculator.ru",
-                    "X-Title": "IB PIR Calculator",
-                },
+                headers=_or_headers(),
             )
-            resp.raise_for_status()
+        if not resp.is_success:
+            raise ValueError(f"OpenRouter {resp.status_code} для модели '{model_id}': {_or_error(resp)}")
         return resp.json()
 
     async def _call_plain(messages: list[dict], max_tokens: int) -> str:
@@ -501,13 +526,11 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
             resp = await http.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 json=payload,
-                headers={
-                    "Authorization": f"Bearer {settings.openrouter_api_key}",
-                    "HTTP-Referer": "https://ib-pir-calculator.ru",
-                    "X-Title": "IB PIR Calculator",
-                },
+                headers=_or_headers(),
             )
-            resp.raise_for_status()
+        if not resp.is_success:
+            # Step 0 failure is non-fatal: fallback to all books
+            return ""
         data = resp.json()
         return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
