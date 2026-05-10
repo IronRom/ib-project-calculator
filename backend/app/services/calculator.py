@@ -144,6 +144,36 @@ def _match_row(
     return None
 
 
+_PRICING_COEFFS = {"reconstruction", "overhaul"}   # always multiply (МУ №620 п.3.14)
+_COMPLEX_COEFFS = {"asu", "seismic", "deepening", "fishery"}  # sum fractional parts
+
+
+def _apply_coefficients(coefficients: list[dict]) -> tuple[float, str]:
+    """МУ №620 п.3.14: compute combined factor and formula label."""
+    pricing = 1.0
+    complex_parts: list[tuple[str, float]] = []
+
+    for c in coefficients:
+        name = (c.get("name") or "").strip()
+        value = float(c.get("value") or 1.0)
+        if name in _PRICING_COEFFS and value != 1.0:
+            pricing *= value
+        elif name in _COMPLEX_COEFFS and value > 1.0:
+            complex_parts.append((name, value - 1.0))
+
+    complex_factor = 1.0 + sum(v for _, v in complex_parts)
+    combined = pricing * complex_factor
+
+    parts: list[str] = []
+    if pricing != 1.0:
+        parts.append(f"×{pricing:.3g}")
+    if complex_parts:
+        detail = "+".join(f"{v:.3g}({n})" for n, v in complex_parts)
+        parts.append(f"×{complex_factor:.3g}[1+{detail}]")
+
+    return combined, " ".join(parts)
+
+
 _CODE_PREFIX = re.compile(r'^(сбцп|сбц|мрр)\s+', re.IGNORECASE)
 
 
@@ -211,9 +241,13 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         else:
             x_calc = match.x_effective
 
+        # МУ №620 п.3.14: apply coefficients
+        coefficients = entity.get("coefficients", [])
+        coeff_factor, coeff_label = _apply_coefficients(coefficients)
+
         # Reference rows values are in тыс. руб. (base year 2001)
         unit_cost = (a + b * x_calc) * 1000
-        cost = unit_cost * qty
+        cost = unit_cost * qty * coeff_factor
 
         row_unit = row.x_unit or x_unit or ""
         row_num  = row.row_num or ""
@@ -237,6 +271,9 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             formula = _fmt_number(a_rub)
         if match.extrapolated and match.x_boundary is not None:
             formula += f" × МУ620 (X_эфф={x_calc:.4g})"
+        if coeff_label:
+            formula += f" {coeff_label}"
+            justification += f" | МУ №620 п.3.14: {coeff_label}"
         if qty > 1:
             formula += f" × {qty} шт."
 
