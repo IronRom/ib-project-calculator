@@ -547,6 +547,16 @@ def _merge_resolved_x(result: ExtractionResult, resolutions: list[dict]) -> None
         entity.notes = (prefix + "\n" + (entity.notes or "")).strip()
 
 
+def _flag_missing_x_values(result: ExtractionResult) -> None:
+    """After all passes: mark entities where x_value is still None so UI can prompt manual entry."""
+    for entity in result.entities:
+        if entity.x_value is not None:
+            continue
+        reason = f"Объём/мощность не указаны в ТЗ для «{entity.object_type}» — введите вручную"
+        entity.x_value_missing_reason = reason
+        result.missing_data.append(f"Нет X: {entity.object_type} ({entity.object_name or entity.address or '—'})")
+
+
 def _merge_coefficients(result: ExtractionResult, assignments: list[dict]) -> None:
     for assignment in assignments:
         idx = assignment.get("entity_index", -1)
@@ -642,6 +652,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
     _fill_sbts_codes(result, db, detected_codes)
 
     if not result.entities or db is None:
+        _flag_missing_x_values(result)
         _validate_entities(result, tz_text)
         return result
 
@@ -702,6 +713,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
                 _merge_resolved_x(result, block.input.get("resolutions", []))
                 break
 
+    _flag_missing_x_values(result)
     _validate_entities(result, tz_text)
     return result
 
@@ -809,6 +821,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
     _fill_sbts_codes(result, db, detected_codes)
 
     if not result.entities or db is None:
+        _flag_missing_x_values(result)
         _validate_entities(result, tz_text)
         return result
 
@@ -852,5 +865,6 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
             except (json.JSONDecodeError, KeyError):
                 pass
 
+    _flag_missing_x_values(result)
     _validate_entities(result, tz_text)
     return result

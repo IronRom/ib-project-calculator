@@ -121,6 +121,37 @@ def compute_calculation(
     return result
 
 
+@router.patch("/{calc_id}/entities/{entity_idx}")
+def patch_entity_x_value(
+    project_id: int,
+    calc_id: int,
+    entity_idx: int,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Patch x_value (and optionally x_unit) of a single entity by index."""
+    from sqlalchemy.orm.attributes import flag_modified
+    project = _get_own_project(project_id, current_user.id, db)
+    calc = db.query(Calculation).filter(Calculation.id == calc_id, Calculation.project_id == project.id).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+    entities = (calc.extracted_entities or {}).get("entities", [])
+    if entity_idx < 0 or entity_idx >= len(entities):
+        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    entity = entities[entity_idx]
+    if "x_value" in body:
+        entity["x_value"] = float(body["x_value"]) if body["x_value"] is not None else None
+    if "x_unit" in body:
+        entity["x_unit"] = body["x_unit"]
+    # clear missing reason once manually set
+    if "x_value" in body and body["x_value"] is not None:
+        entity["x_value_missing_reason"] = None
+    flag_modified(calc, "extracted_entities")
+    db.commit()
+    return entity
+
+
 @router.get("/{calc_id}/unit-check")
 def unit_check(
     project_id: int,

@@ -86,6 +86,7 @@ class ExtractedEntity(BaseModel):
     notes: Optional[str] = ""
     confidence: float = 0.0
     tz_quote: Optional[str] = ""         # verbatim excerpt from TZ that justifies this entity
+    x_value_missing_reason: Optional[str] = None  # set when x_value=None after all passes
 
 
 class ExtractionResult(BaseModel):

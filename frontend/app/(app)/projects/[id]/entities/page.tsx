@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { getCalculation, getProject, computeCalculation, getUnitCheck, Calculation, ExtractedEntity, CalculationResult, CalcPosition, Project, UnitCheckItem } from '@/lib/api'
+import { getCalculation, getProject, computeCalculation, patchEntityXValue, getUnitCheck, Calculation, ExtractedEntity, CalculationResult, CalcPosition, Project, UnitCheckItem } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
@@ -120,6 +120,8 @@ export default function EntitiesPage() {
           const obvious = entities.filter(e => (e.confidence ?? 1) >= 0.7)
           const suggested = entities.filter(e => (e.confidence ?? 1) < 0.7)
           const colHeaders = ['Категория', 'Тип объекта', 'Наименование', 'Адрес', 'X (из ТЗ)', 'Ед.', 'X (таблица)', 'Уверенность']
+          const projectIdNum = Number(id)
+          const calcIdNum = Number(calcId)
           const theadRow = (
             <tr>
               {colHeaders.map((h, i) => (
@@ -141,7 +143,7 @@ export default function EntitiesPage() {
                     <tbody>
                       {obvious.map((entity, i) => {
                         const globalIdx = entities.indexOf(entity)
-                        return <EntityRow key={i} entity={entity} unitCheck={unitChecks[globalIdx]} isLast={i === obvious.length - 1} />
+                        return <EntityRow key={i} entity={entity} entityIdx={globalIdx} projectId={projectIdNum} calcId={calcIdNum} unitCheck={unitChecks[globalIdx]} isLast={i === obvious.length - 1} onXValueSaved={(val, unit) => { entity.x_value = val; entity.x_unit = unit ?? entity.x_unit ?? ''; entity.x_value_missing_reason = undefined; setCalc(c => c ? { ...c } : c) }} />
                       })}
                     </tbody>
                   </table>
@@ -166,7 +168,7 @@ export default function EntitiesPage() {
                       <tbody>
                         {suggested.map((entity, i) => {
                           const globalIdx = entities.indexOf(entity)
-                          return <EntityRow key={i} entity={entity} unitCheck={unitChecks[globalIdx]} isLast={i === suggested.length - 1} suggested />
+                          return <EntityRow key={i} entity={entity} entityIdx={globalIdx} projectId={projectIdNum} calcId={calcIdNum} unitCheck={unitChecks[globalIdx]} isLast={i === suggested.length - 1} suggested onXValueSaved={(val, unit) => { entity.x_value = val; entity.x_unit = unit ?? entity.x_unit ?? ''; entity.x_value_missing_reason = undefined; setCalc(c => c ? { ...c } : c) }} />
                         })}
                       </tbody>
                     </table>
@@ -279,10 +281,37 @@ function SummaryRow({ cols, label, value, bold, note }: { cols: number; label: s
   )
 }
 
-function EntityRow({ entity, unitCheck, isLast, suggested }: { entity: ExtractedEntity; unitCheck?: UnitCheckItem; isLast: boolean; suggested?: boolean }) {
+function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, suggested, onXValueSaved }: {
+  entity: ExtractedEntity
+  entityIdx: number
+  projectId: number
+  calcId: number
+  unitCheck?: UnitCheckItem
+  isLast: boolean
+  suggested?: boolean
+  onXValueSaved?: (val: number, unit?: string) => void
+}) {
   const tone = CATEGORY_TONES[entity.category] || 'default'
   const label = CATEGORY_LABELS[entity.category] || entity.category
   const rowBg = suggested ? 'var(--status-warning-bg)' : undefined
+  const [editing, setEditing] = useState(false)
+  const [inputVal, setInputVal] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const xMissing = entity.x_value == null
+
+  async function handleSave() {
+    const num = parseFloat(inputVal.replace(',', '.'))
+    if (isNaN(num)) return
+    setSaving(true)
+    try {
+      await patchEntityXValue(projectId, calcId, entityIdx, num)
+      onXValueSaved?.(num)
+      setEditing(false)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   let unitCell: React.ReactNode = <span style={{ color: 'var(--fg-4)', fontSize: 11 }}>—</span>
   if (unitCheck) {
@@ -305,25 +334,61 @@ function EntityRow({ entity, unitCheck, isLast, suggested }: { entity: Extracted
     }
   }
 
+  const xCell = xMissing ? (
+    editing ? (
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <input
+          autoFocus
+          value={inputVal}
+          onChange={e => setInputVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false) }}
+          style={{ width: 80, fontFamily: 'var(--font-mono)', fontSize: 12, padding: '3px 6px', background: 'var(--bg-default)', border: '1px solid var(--warning-500)', borderRadius: 4, color: 'var(--fg-1)', outline: 'none' }}
+          placeholder="0.0"
+        />
+        <button onClick={handleSave} disabled={saving} style={{ fontSize: 11, padding: '3px 8px', background: 'var(--warning-500)', color: '#000', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+          {saving ? '…' : '✓'}
+        </button>
+        <button onClick={() => setEditing(false)} style={{ fontSize: 11, padding: '3px 6px', background: 'transparent', color: 'var(--fg-3)', border: 'none', cursor: 'pointer' }}>✕</button>
+      </div>
+    ) : (
+      <button
+        onClick={() => setEditing(true)}
+        title={entity.x_value_missing_reason ?? 'Не указано в ТЗ'}
+        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: 'var(--status-warning-bg)', border: '1px solid var(--warning-500)', borderRadius: 4, color: 'var(--warning-400)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+      >
+        ⚠ ввести
+      </button>
+    )
+  ) : (
+    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+      {entity.x_value!.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+    </span>
+  )
+
+  const hasFooter = !!(entity.notes || entity.tz_quote || (xMissing && entity.x_value_missing_reason))
+
   return (
     <>
-      <tr style={{ borderBottom: (isLast && !entity.notes) ? 'none' : 'var(--hairline)', background: rowBg }}>
+      <tr style={{ borderBottom: (isLast && !hasFooter) ? 'none' : 'var(--hairline)', background: xMissing ? 'color-mix(in srgb, var(--status-warning-bg) 60%, transparent)' : rowBg }}>
         <td style={{ padding: '12px 14px' }}><Chip tone={tone}>{label}</Chip></td>
         <td style={{ padding: '12px 14px', fontWeight: 500 }}>{entity.object_type}</td>
         <td style={{ padding: '12px 14px', color: 'var(--fg-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entity.object_name}</td>
         <td style={{ padding: '12px 14px', color: 'var(--fg-3)', fontSize: 12, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entity.address || '—'}</td>
-        <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, textAlign: 'right' }}>
-          {entity.x_value != null ? entity.x_value.toLocaleString('ru-RU', { maximumFractionDigits: 4 }) : '—'}
-        </td>
+        <td style={{ padding: '12px 14px', textAlign: 'right' }}>{xCell}</td>
         <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{entity.x_unit || '—'}</td>
         <td style={{ padding: '12px 14px' }}>{unitCell}</td>
         <td style={{ padding: '12px 14px' }}>
           <ConfidenceBadge value={entity.confidence ?? 0} small />
         </td>
       </tr>
-      {(entity.notes || entity.tz_quote) && (
-        <tr style={{ borderBottom: isLast ? 'none' : 'var(--hairline)', background: rowBg }}>
+      {hasFooter && (
+        <tr style={{ borderBottom: isLast ? 'none' : 'var(--hairline)', background: xMissing ? 'color-mix(in srgb, var(--status-warning-bg) 60%, transparent)' : rowBg }}>
           <td colSpan={8} style={{ padding: '4px 14px 10px 14px' }}>
+            {xMissing && entity.x_value_missing_reason && (
+              <div style={{ fontSize: 11, color: 'var(--warning-400)', marginBottom: 4 }}>
+                ⚠ {entity.x_value_missing_reason}
+              </div>
+            )}
             {entity.tz_quote && (
               <div style={{ fontSize: 11, color: 'var(--fg-4)', fontFamily: 'var(--font-mono)', marginBottom: entity.notes ? 4 : 0 }}>
                 <span style={{ color: 'var(--fg-3)', marginRight: 4 }}>ТЗ:</span>«{entity.tz_quote}»

@@ -206,6 +206,14 @@ export function computeCalculation(projectId: number, calcId: number) {
   return request<CalculationResult>(`/projects/${projectId}/calculations/${calcId}/compute`, { method: 'POST' })
 }
 
+export function patchEntityXValue(projectId: number, calcId: number, entityIdx: number, xValue: number | null, xUnit?: string) {
+  return request<ExtractedEntity>(`/projects/${projectId}/calculations/${calcId}/entities/${entityIdx}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ x_value: xValue, ...(xUnit !== undefined ? { x_unit: xUnit } : {}) }),
+  })
+}
+
 export interface UnitCheckItem {
   index: number
   ok: boolean
@@ -291,6 +299,7 @@ export interface ExtractedEntity {
   notes?: string
   confidence?: number
   tz_quote?: string
+  x_value_missing_reason?: string
 }
 
 export interface ExtractionResult {
