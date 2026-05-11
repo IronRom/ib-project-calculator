@@ -157,14 +157,50 @@ def _match_row(
 _PRICING_COEFFS = {"reconstruction", "overhaul"}   # always multiply (МУ №620 п.3.14)
 _COMPLEX_COEFFS = {"asu", "seismic", "deepening", "fishery"}  # sum fractional parts
 
+_RE_ROW_N   = re.compile(r'п\.?\s*(\d+)', re.IGNORECASE)
+_RE_RNG_SEG = re.compile(r'(\d+)(?:-(\d+))?')
+
+
+def _row_in_range(row_num_str: Optional[str], row_range: Optional[str]) -> bool:
+    """Return True if row_num falls within row_range (or no restriction exists).
+
+    row_num_str: e.g. "п.10"
+    row_range:   e.g. "пп.25-28" | "пп.1-4,13-15" | None
+    """
+    if not row_range:
+        return True
+    if not row_num_str:
+        return True
+    m = _RE_ROW_N.search(row_num_str)
+    if not m:
+        return True  # can't parse → don't filter
+    n = int(m.group(1))
+    # Strip prefix and iterate comma-separated segments
+    segments = row_range.replace('пп.', '').replace('п.', '').strip()
+    for seg in segments.split(','):
+        seg = seg.strip()
+        rm = _RE_RNG_SEG.match(seg)
+        if not rm:
+            continue
+        lo = int(rm.group(1))
+        hi = int(rm.group(2)) if rm.group(2) else lo
+        if lo <= n <= hi:
+            return True
+    return False
+
 
 def _resolve_coeff_values(
-    db: Session, book_id: int, table_num: int, coefficients: list[dict]
+    db: Session, book_id: int, table_num: int, coefficients: list[dict],
+    matched_row_num: Optional[str] = None,
 ) -> list[dict]:
     """Replace AI flag-values (1.0) with actual coeff_min from book_conditions.
 
-    Lookup order: table-specific row first, then table=None (global). Uses coeff_min
-    as the conservative lower bound when a range is stored.
+    Lookup order: table-specific conditions first (filtered by row_range against
+    the matched row), then table=None (global). Uses coeff_min as the conservative
+    lower bound when a range is stored.
+
+    matched_row_num: row_num of the DB row that was matched (e.g. "п.10").
+    When provided, conditions whose row_range does NOT include this row are skipped.
     """
     from app.models import BookCondition
 
@@ -173,34 +209,45 @@ def _resolve_coeff_values(
         key = (c.get("name") or "").strip()
         if not key:
             continue
-        # table-specific
-        cond = (
+
+        # table-specific — get ALL candidates, pick first that covers matched row
+        table_conds = (
             db.query(BookCondition)
             .filter(
                 BookCondition.book_version_id == book_id,
                 BookCondition.coeff_key == key,
                 BookCondition.table_num == table_num,
             )
-            .first()
+            .all()
         )
-        # global fallback
+        cond = next(
+            (tc for tc in table_conds if _row_in_range(matched_row_num, tc.row_range)),
+            None,
+        )
+
+        # global fallback (row_range usually None → applies everywhere)
         if cond is None:
-            cond = (
+            global_conds = (
                 db.query(BookCondition)
                 .filter(
                     BookCondition.book_version_id == book_id,
                     BookCondition.coeff_key == key,
                     BookCondition.table_num.is_(None),
                 )
-                .first()
+                .all()
             )
+            cond = next(
+                (gc for gc in global_conds if _row_in_range(matched_row_num, gc.row_range)),
+                None,
+            )
+
         if cond is None or cond.coeff_min is None:
-            continue  # no value in DB → skip (don't invent a number)
+            continue  # no applicable condition → skip
         resolved.append({
             **c,
             "value": float(cond.coeff_min),
             "condition_short": cond.condition_short or "",
-            "_table_num": cond.table_num,  # for paragraph ref derivation
+            "_table_num": cond.table_num,
         })
     return resolved
 
@@ -308,7 +355,10 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             x_calc = match.x_effective
 
         # МУ №620 п.3.14: apply coefficients (resolve AI flag→actual DB value first)
-        coefficients = _resolve_coeff_values(db, book.id, table_num, entity.get("coefficients", []))
+        coefficients = _resolve_coeff_values(
+            db, book.id, table_num, entity.get("coefficients", []),
+            matched_row_num=row.row_num,
+        )
         coeff_factor, applied_coeffs = _apply_coefficients(coefficients)
 
         # Reference rows values are in тыс. руб. (base year 2001)
