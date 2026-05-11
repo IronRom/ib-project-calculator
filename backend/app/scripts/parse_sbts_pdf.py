@@ -19,6 +19,7 @@ class ParsedRow:
     x_unit: Optional[str]
     a: float
     b: Optional[float]
+    _point_value: Optional[float] = None  # internal: numeric расход for consecutive range build
 
 
 # ── Regex ─────────────────────────────────────────────────────────────────────
@@ -132,6 +133,35 @@ def _extract_range(text: str) -> tuple[Optional[float], Optional[float]]:
     return None, None
 
 
+def _is_pure_range_text(text: str) -> bool:
+    """True if text is fully consumed by a range expression (no extra words)."""
+    if not text:
+        return False
+    t = text.strip()
+    m = RE_RANGE.search(t)
+    if not m:
+        return False
+    return m.start() == 0 and m.end() == len(t)
+
+
+def _build_consecutive_ranges(rows: list['ParsedRow']) -> None:
+    """Post-process: rows with _point_value → consecutive [x_min, x_max] ranges.
+
+    Used for T16/T17 where each row's расход is a point value in column 2.
+    Groups are identified by (table_num, description); each group gets fresh ranges.
+    """
+    group_prev: dict[tuple, float] = {}
+    for row in rows:
+        if row._point_value is None:
+            continue
+        key = (row.table_num, row.description)
+        prev = group_prev.get(key)
+        row.x_min = prev
+        row.x_max = row._point_value
+        group_prev[key] = row._point_value
+        row._point_value = None
+
+
 def _parse_logical_row(
     lines_buf: list[str],
     row_num_int: int,
@@ -200,8 +230,24 @@ def _parse_logical_row(
     elif last_x_unit:
         x_unit = last_x_unit
 
-    # Build description
+    # Decide whether range_text goes into description.
+    # When type_prefix is set:
+    #   • pure number  → point_value (расход marker, T16/T17); excluded from desc
+    #   • pure range   → x_min/x_max capture it; excluded from desc (avoids T15 "до 50" in name)
+    #   • mixed text   → keep in desc as usual
+    point_value: Optional[float] = None
+    include_range_in_desc = True
+
     if type_prefix and range_text:
+        pn = _parse_num(range_text)
+        if pn is not None:
+            point_value = pn
+            include_range_in_desc = False
+        elif _is_pure_range_text(range_text):
+            include_range_in_desc = False
+
+    # Build description
+    if type_prefix and range_text and include_range_in_desc:
         description = f"{type_prefix} {range_text}".strip()
     elif type_prefix:
         description = type_prefix
@@ -224,6 +270,7 @@ def _parse_logical_row(
         x_unit=x_unit,
         a=a_val,
         b=b_val,
+        _point_value=point_value,
     )
     return row, last_x_unit
 
@@ -376,6 +423,7 @@ def parse_pdf(pdf_path: str) -> list[ParsedRow]:
         prev_blank = False
 
     flush_row()
+    _build_consecutive_ranges(rows)
     return rows
 
 
