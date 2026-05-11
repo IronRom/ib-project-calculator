@@ -359,14 +359,14 @@ function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, ov
 
   // X (из ТЗ) cell — always editable
   const xCell = editing ? (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
       <input
         ref={inputRef}
         value={inputVal}
         onChange={e => setInputVal(e.target.value)}
         onKeyDown={handleKeyDown}
         onBlur={commitEdit}
-        style={{ width: 70, fontFamily: 'var(--font-mono)', fontSize: 12, padding: '3px 6px', background: 'var(--bg-default)', border: '1px solid var(--accent-500)', borderRadius: 4, color: 'var(--fg-1)', outline: 'none' }}
+        style={{ width: 74, fontFamily: 'var(--font-mono)', fontSize: 12, padding: '3px 6px', background: 'var(--bg-default)', border: '1px solid var(--accent-500)', borderRadius: 4, color: 'var(--fg-1)', outline: 'none', textAlign: 'right' }}
         placeholder="0.0"
       />
     </div>
@@ -376,12 +376,13 @@ function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, ov
       title={xMissing ? (entity.x_value_missing_reason ?? 'Не указано в ТЗ') : 'Нажмите для редактирования'}
       style={{
         cursor: isDeleted ? 'default' : 'pointer',
-        display: 'inline-flex', alignItems: 'center', gap: 6,
+        display: 'block', width: '100%', textAlign: 'right',
         fontFamily: 'var(--font-mono)', fontSize: 12,
-        padding: '3px 8px', borderRadius: 4, minWidth: 60, justifyContent: 'flex-end',
+        padding: '3px 8px', borderRadius: 4,
         background: xMissing ? 'color-mix(in srgb, var(--warning-500) 15%, transparent)' : 'transparent',
         border: xMissing ? '1px solid var(--warning-500)' : '1px solid transparent',
         color: xMissing ? 'var(--warning-400)' : 'inherit',
+        boxSizing: 'border-box',
         ...strikeStyle,
       }}
     >

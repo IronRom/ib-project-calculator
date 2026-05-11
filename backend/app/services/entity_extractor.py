@@ -251,10 +251,16 @@ def _validate_entities(result: "ExtractionResult", tz_text: str) -> None:
     def _quote_in_text(quote: str, text: str) -> bool:
         if not quote or len(quote) < 15:
             return False
-        # Try 20-char sliding window from quote
-        window = min(40, len(quote))
-        chunk = quote[:window].strip()
-        return chunk.lower() in text.lower()
+        tl = text.lower()
+        ql = quote.lower()
+        # Try multiple 25-char chunks across the quote (start, 1/3, 2/3)
+        chunk_size = 25
+        positions = [0, len(ql) // 3, len(ql) * 2 // 3]
+        for pos in positions:
+            chunk = ql[pos:pos + chunk_size].strip()
+            if len(chunk) >= 15 and chunk in tl:
+                return True
+        return False
 
     for entity in result.entities:
         flags: list[str] = []
