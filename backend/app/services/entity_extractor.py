@@ -85,8 +85,10 @@ def _build_types_context(db, book_codes: list[str]) -> str:
     lines.append(
         "Каждый тип — отдельная позиция сметы. "
         "Если объект соответствует нескольким типам — создай позицию для каждого.\n"
-        "Для каждой позиции укажи sbts_object_type_id из списка ниже "
-        "и sbts_code = код справочника (указан в скобках после названия).\n"
+        "Для каждой позиции укажи:\n"
+        "  sbts_object_type_id — id из [type_id=N] в списке ниже\n"
+        "  sbts_table          — номер таблицы из «Таблица N [type_id=N]»\n"
+        "  sbts_code           — код справочника (в скобках после названия справочника)\n"
     )
 
     for book in matched:
@@ -488,6 +490,21 @@ RESOLVE_X_TOOL_OPENAI = {
 # ── Shared pipeline ───────────────────────────────────────────────────────────
 
 
+def _fill_sbts_table_from_type_id(result: ExtractionResult, db) -> None:
+    """Deterministic: fill sbts_table from sbts_object_type_id when AI omitted it."""
+    if db is None:
+        return
+    from app.models import BookObjectType
+    type_ids = {e.sbts_object_type_id for e in result.entities if e.sbts_table is None and e.sbts_object_type_id}
+    if not type_ids:
+        return
+    types = db.query(BookObjectType).filter(BookObjectType.id.in_(type_ids)).all()
+    type_to_table = {t.id: t.table_num for t in types}
+    for entity in result.entities:
+        if entity.sbts_table is None and entity.sbts_object_type_id in type_to_table:
+            entity.sbts_table = type_to_table[entity.sbts_object_type_id]
+
+
 def _fill_sbts_codes(result: ExtractionResult, db, detected_codes: list[str]) -> None:
     """Fill empty sbts_code by matching entity's sbts_table → book that owns it."""
     if not db or not detected_codes:
@@ -655,6 +672,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
 
     if not result:
         return ExtractionResult(entities=[], missing_data=["Не удалось извлечь данные из ТЗ"])
+    _fill_sbts_table_from_type_id(result, db)
     _fill_sbts_codes(result, db, detected_codes)
 
     if not result.entities or db is None:
@@ -824,6 +842,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
         )
 
     result = ExtractionResult(**json.loads(tool_calls[0]["function"]["arguments"]))
+    _fill_sbts_table_from_type_id(result, db)
     _fill_sbts_codes(result, db, detected_codes)
 
     if not result.entities or db is None:
