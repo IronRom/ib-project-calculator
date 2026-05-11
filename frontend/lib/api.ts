@@ -206,12 +206,16 @@ export function computeCalculation(projectId: number, calcId: number) {
   return request<CalculationResult>(`/projects/${projectId}/calculations/${calcId}/compute`, { method: 'POST' })
 }
 
-export function patchEntityXValue(projectId: number, calcId: number, entityIdx: number, xValue: number | null, xUnit?: string) {
+export function patchEntity(projectId: number, calcId: number, entityIdx: number, patch: Partial<{ x_value: number | null; x_unit: string; deleted: boolean }>) {
   return request<ExtractedEntity>(`/projects/${projectId}/calculations/${calcId}/entities/${entityIdx}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ x_value: xValue, ...(xUnit !== undefined ? { x_unit: xUnit } : {}) }),
+    body: JSON.stringify(patch),
   })
+}
+
+export function patchEntityXValue(projectId: number, calcId: number, entityIdx: number, xValue: number | null, xUnit?: string) {
+  return patchEntity(projectId, calcId, entityIdx, { x_value: xValue, ...(xUnit !== undefined ? { x_unit: xUnit } : {}) })
 }
 
 export interface UnitCheckItem {
@@ -300,6 +304,7 @@ export interface ExtractedEntity {
   confidence?: number
   tz_quote?: string
   x_value_missing_reason?: string
+  deleted?: boolean
 }
 
 export interface ExtractionResult {

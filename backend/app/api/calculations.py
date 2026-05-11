@@ -144,6 +144,8 @@ def patch_entity_x_value(
         entity["x_value"] = float(body["x_value"]) if body["x_value"] is not None else None
     if "x_unit" in body:
         entity["x_unit"] = body["x_unit"]
+    if "deleted" in body:
+        entity["deleted"] = bool(body["deleted"])
     # clear missing reason once manually set
     if "x_value" in body and body["x_value"] is not None:
         entity["x_value_missing_reason"] = None

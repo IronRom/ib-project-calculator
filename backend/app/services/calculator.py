@@ -267,7 +267,7 @@ def _fmt_ru(n: float) -> str:
 
 
 def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
-    entities = entities_dict.get("entities", [])
+    entities = [e for e in entities_dict.get("entities", []) if not e.get("deleted", False)]
 
     positions = []
     errors = []
