@@ -343,8 +343,16 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             formula = _fmt_ru(a_rub)
         if match.extrapolated and match.x_boundary is not None:
             formula += f"×МУ620(X={_fmt_ru(x_calc)})"
-        if coeff_factor != 1.0:
-            formula += f"*{_fmt_ru(coeff_factor)}"
+        # Show each pricing coefficient separately; group complex into one factor.
+        # МУ №620 п.3.14: ценообразующие — умножаются, усложняющие — суммируются как (1+Σ).
+        # Formula display: ×K_ценообразующий₁ × K_ценообразующий₂ × (1+Σ_усложняющих).
+        for _n, _v, _ in applied_coeffs:
+            if _n in _PRICING_COEFFS and _v != 1.0:
+                formula += f"×{_fmt_ru(_v)}"
+        _complex_vals = [_v for _n, _v, _ in applied_coeffs if _n in _COMPLEX_COEFFS and _v > 1.0]
+        if _complex_vals:
+            _cf = 1.0 + sum(_v - 1.0 for _v in _complex_vals)
+            formula += f"×{_fmt_ru(_cf)}"
         if qty > 1:
             formula += f"*{qty}"
 
