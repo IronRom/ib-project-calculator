@@ -51,7 +51,7 @@ CONDITIONS = [
     # МУ №620: сейсмика, реконструкция, КР
     (None, None, "Сейсмичность 7–8 баллов МСК (МУ №620)", "multiplier_range", 1.10, 1.15, "seismic"),
     (None, None, "Сейсмичность 9 баллов МСК и выше (МУ №620)", "multiplier_range", 1.15, 1.25, "seismic"),
-    (None, None, "Реконструкция объекта (МУ №620)", "multiplier_range", 1.10, 1.30, "reconstruction"),
+    (None, None, "Реконструкция объекта (МУ №620 п.3.4)", "multiplier_range", 1.10, 1.50, "reconstruction"),
     (None, None, "Капитальный ремонт объекта (МУ №620)", "multiplier_range", 1.05, 1.15, "overhaul"),
 
     # ═══════════════════════════════════════════════════════════════════════

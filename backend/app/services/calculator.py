@@ -242,7 +242,17 @@ def _resolve_coeff_values(
 
         if cond is None or (cond.coeff_max is None and cond.coeff_min is None):
             continue  # no applicable condition → skip
-        value = float(cond.coeff_max if cond.coeff_max is not None else cond.coeff_min)
+
+        ai_value = float(c.get("value", 1.0))
+        is_flag = abs(ai_value - 1.0) < 0.001
+
+        if is_flag:
+            # Standard path: AI flagged with 1.0, resolve from DB
+            value = float(cond.coeff_max if cond.coeff_max is not None else cond.coeff_min)
+        else:
+            # AI pre-computed compound value (e.g. deepening 1.15^4); preserve it
+            value = ai_value
+
         resolved.append({
             **c,
             "value": value,
