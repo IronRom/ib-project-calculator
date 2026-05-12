@@ -193,11 +193,10 @@ def _resolve_coeff_values(
     db: Session, book_id: int, table_num: int, coefficients: list[dict],
     matched_row_num: Optional[str] = None,
 ) -> list[dict]:
-    """Replace AI flag-values (1.0) with actual coeff_min from book_conditions.
+    """Replace AI flag-values (1.0) with actual coeff_max from book_conditions.
 
     Lookup order: table-specific conditions first (filtered by row_range against
-    the matched row), then table=None (global). Uses coeff_min as the conservative
-    lower bound when a range is stored.
+    the matched row), then table=None (global). Uses coeff_max (upper bound).
 
     matched_row_num: row_num of the DB row that was matched (e.g. "п.10").
     When provided, conditions whose row_range does NOT include this row are skipped.
@@ -241,11 +240,12 @@ def _resolve_coeff_values(
                 None,
             )
 
-        if cond is None or cond.coeff_min is None:
+        if cond is None or (cond.coeff_max is None and cond.coeff_min is None):
             continue  # no applicable condition → skip
+        value = float(cond.coeff_max if cond.coeff_max is not None else cond.coeff_min)
         resolved.append({
             **c,
-            "value": float(cond.coeff_min),
+            "value": value,
             "condition_short": cond.condition_short or "",
             "_table_num": cond.table_num,
         })
@@ -380,6 +380,8 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             justification += f" (свыше {_fmt_number(float(row.x_min))})"
         if match.note:
             justification += f" [{match.note}]"
+        if match.extrapolated and match.x_boundary is not None:
+            justification += f"; МУ №620 Прил.1 (X={_fmt_ru(match.x_effective)} {row_unit}, X_расч={_fmt_ru(x_calc)})"
         # Coefficient references: п. 2.{table_num} (condition text К=value)
         for _name, _val, _short in applied_coeffs:
             para = f"п. 2.{table_num}" if table_num else "п. 1"
@@ -387,12 +389,12 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
 
         # ── Formula (расчёт стоимости) ────────────────────────────────────────
         a_rub, b_rub = a * 1000, b * 1000
+        # When extrapolated, show x_calc in formula (not x_effective); МУ620 reference in justification
+        x_formula = x_calc if (match.extrapolated and match.x_boundary is not None) else match.x_effective
         if b:
-            formula = f"({_fmt_ru(a_rub)}+{_fmt_ru(b_rub)}*{_fmt_ru(match.x_effective)})"
+            formula = f"({_fmt_ru(a_rub)}+{_fmt_ru(b_rub)}*{_fmt_ru(x_formula)})"
         else:
             formula = _fmt_ru(a_rub)
-        if match.extrapolated and match.x_boundary is not None:
-            formula += f"×МУ620(X={_fmt_ru(x_calc)})"
         # Show each pricing coefficient separately; group complex into one factor.
         # МУ №620 п.3.14: ценообразующие — умножаются, усложняющие — суммируются как (1+Σ).
         # Formula display: ×K_ценообразующий₁ × K_ценообразующий₂ × (1+Σ_усложняющих).
