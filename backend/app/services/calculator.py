@@ -154,8 +154,8 @@ def _match_row(
     return None
 
 
-_PRICING_COEFFS = {"reconstruction", "overhaul"}   # always multiply (МУ №620 п.3.14)
-_COMPLEX_COEFFS = {"asu", "seismic", "deepening", "fishery"}  # sum fractional parts
+_PRICING_COEFFS = {"reconstruction", "overhaul", "deepening"}  # always multiply; shown separately per step
+_COMPLEX_COEFFS = {"asu", "seismic", "fishery"}  # sum fractional parts: 1+Σ(Ki-1)
 
 _RE_ROW_N   = re.compile(r'п\.?\s*(\d+)', re.IGNORECASE)
 _RE_RNG_SEG = re.compile(r'(\d+)(?:-(\d+))?')
