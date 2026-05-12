@@ -364,7 +364,7 @@ _COEFF_ITEM = {
     "properties": {
         "name": {
             "type": "string",
-            "enum": ["reconstruction", "overhaul", "asu", "deepening", "seismic", "fishery"],
+            "description": "coeff_key из book_conditions справочника (reconstruction, overhaul, asu, deepening, seismic, fishery и др.)",
         },
         "value": {"type": "number", "const": 1},
         "reason": {"type": "string"},

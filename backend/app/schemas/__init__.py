@@ -63,10 +63,8 @@ class ProjectOut(BaseModel):
 
 # ── Calculations ──────────────────────────────────────────────────────────────
 
-COEFF_TYPES = Literal["reconstruction", "overhaul", "asu", "deepening", "seismic", "fishery"]
-
 class CoefficientInput(BaseModel):
-    name: COEFF_TYPES
+    name: str  # matches coeff_key in book_conditions; unknown keys are silently skipped
     value: float = Field(default=1.0, ge=0.5, le=3.0)
     reason: str = ""
 
