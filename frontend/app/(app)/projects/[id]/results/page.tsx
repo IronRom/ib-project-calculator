@@ -57,6 +57,7 @@ export default function ResultsPage() {
     setLoading(true); setError('')
     try {
       const r = await computeCalculation(projectId, calcId)
+      console.log('[results] compute done, positions:', r?.positions?.length, 'result truthy:', !!r)
       setResult(r)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Ошибка расчёта')
@@ -84,8 +85,8 @@ export default function ResultsPage() {
         actions={
           <div style={{ display: 'flex', gap: 8 }}>
             {result && (
-              <Button variant="ghost" disabled={exporting} onClick={handleExport}>
-                {exporting ? 'Экспорт…' : '↓ Скачать 2ПС ИР'}
+              <Button variant="secondary" disabled={exporting} onClick={handleExport}>
+                {exporting ? 'Экспорт…' : '↓ 2ПС ИР'}
               </Button>
             )}
             <Button variant="primary" disabled={loading || !calcId} onClick={handleCompute}>

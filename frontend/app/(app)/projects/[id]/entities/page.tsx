@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
-  getCalculation, getProject, computeCalculation, patchEntity,
+  getCalculation, getProject, computeCalculation, downloadExport2PS, patchEntity,
   getUnitCheck, Calculation, ExtractedEntity, CalculationResult,
   CalcPosition, Project, UnitCheckItem,
 } from '@/lib/api'
@@ -223,10 +223,15 @@ export default function EntitiesPage() {
 
         {/* Recalculate button */}
         {entities.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <Button variant="primary" disabled={computing || !calcId} onClick={handleCompute}>
               {computing ? 'Расчёт…' : calcResult ? 'Пересчитать' : 'Рассчитать стоимость ПИР'}
             </Button>
+            {calcResult && calcId && (
+              <Button variant="secondary" onClick={() => downloadExport2PS(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
+                ↓ 2ПС ИР
+              </Button>
+            )}
             {dirty && !computing && (
               <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Нажмите, чтобы применить изменения</span>
             )}
