@@ -192,7 +192,8 @@ def generate_2ps_excel(project_name: str, stage: str, result: dict[str, Any]) ->
 
     sf = result.get("stage_factor", 1.0)
     if sf != 1.0:
-        _sum_row(f"Доля стоимости основных проектных работ, стадия {stage} (СБЦП п.1.7)", sf)
+        book_code = book_refs[0] if book_refs else "СБЦП 81-2001-17"
+        _sum_row(f"Доля стоимости основных проектных работ, стадия {stage} ({book_code}, п.1.7)", sf)
         _sum_row(f"Итого с долей стоимости проектирования К={sf}",
                  result["cost_with_stage"], bold=True, fill=_FILL_TOTAL)
 
