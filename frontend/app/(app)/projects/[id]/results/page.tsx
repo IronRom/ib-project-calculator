@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
-import { computeCalculation, getCalculation, CalculationResult, CalcPosition } from '@/lib/api'
+import { computeCalculation, downloadExport2PS, getCalculation, CalculationResult, CalcPosition } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
 
@@ -40,6 +40,7 @@ export default function ResultsPage() {
 
   const [result, setResult] = useState<CalculationResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -64,15 +65,33 @@ export default function ResultsPage() {
     }
   }
 
+  async function handleExport() {
+    setExporting(true); setError('')
+    try {
+      await downloadExport2PS(projectId, calcId)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Ошибка экспорта')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <>
       <Topbar
         title="Расчёт стоимости ПИР"
         breadcrumb="Проект"
         actions={
-          <Button variant="primary" disabled={loading || !calcId} onClick={handleCompute}>
-            {loading ? 'Расчёт…' : result ? 'Пересчитать' : 'Рассчитать'}
-          </Button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {result && (
+              <Button variant="ghost" disabled={exporting} onClick={handleExport}>
+                {exporting ? 'Экспорт…' : '↓ Скачать 2ПС ИР'}
+              </Button>
+            )}
+            <Button variant="primary" disabled={loading || !calcId} onClick={handleCompute}>
+              {loading ? 'Расчёт…' : result ? 'Пересчитать' : 'Рассчитать'}
+            </Button>
+          </div>
         }
       />
       <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>

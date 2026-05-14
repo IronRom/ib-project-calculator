@@ -1,8 +1,9 @@
 import asyncio
+import urllib.parse
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_calculate
@@ -213,6 +214,33 @@ def unit_check(
             })
 
     return results
+
+
+@router.get("/{calc_id}/export")
+def export_2ps(
+    project_id: int,
+    calc_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.services.export_2ps import generate_2ps_excel
+    project = _get_own_project(project_id, current_user.id, db)
+    calc = db.query(Calculation).filter(Calculation.id == calc_id, Calculation.project_id == project.id).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+    if not calc.calculation_result:
+        raise HTTPException(status_code=422, detail="Сначала выполните расчёт")
+
+    result = calc.calculation_result
+    stage  = (calc.extracted_entities or {}).get("stage", "П+Р")
+    xlsx   = generate_2ps_excel(project.name, stage, result)
+
+    safe_name = urllib.parse.quote(f"2ПС_ИР_{project.name}.xlsx")
+    return Response(
+        content=xlsx,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}"},
+    )
 
 
 @router.get("/{calc_id}", response_model=CalculationOut)

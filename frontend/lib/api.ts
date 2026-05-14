@@ -206,6 +206,29 @@ export function computeCalculation(projectId: number, calcId: number) {
   return request<CalculationResult>(`/projects/${projectId}/calculations/${calcId}/compute`, { method: 'POST' })
 }
 
+export async function downloadExport2PS(projectId: number, calcId: number): Promise<void> {
+  const token = getToken()
+  const res = await fetch(`${BASE}/projects/${projectId}/calculations/${calcId}/export`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `HTTP ${res.status}`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  // Try to use the filename from Content-Disposition header
+  const cd = res.headers.get('Content-Disposition') || ''
+  const match = cd.match(/filename\*?=(?:UTF-8'')?(.+)/i)
+  a.download = match ? decodeURIComponent(match[1].replace(/"/g, '')) : `2ПС_ИР_${calcId}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 export function patchEntity(projectId: number, calcId: number, entityIdx: number, patch: Partial<{ x_value: number | null; x_unit: string; deleted: boolean }>) {
   return request<ExtractedEntity>(`/projects/${projectId}/calculations/${calcId}/entities/${entityIdx}`, {
     method: 'PATCH',
