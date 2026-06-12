@@ -10,6 +10,28 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
+class PriceQuarterlyIndex(Base):
+    """Per-base-year quarterly price indices from Минстрой letters.
+
+    base_year: price level year of the reference book (2001, 2021, 2022, ...)
+    work_type: 'project' | 'survey'
+    index_value: multiplier from base_year level to current prices
+    """
+    __tablename__ = "price_quarterly_indices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    year = Column(Integer, nullable=False)
+    quarter = Column(Integer, nullable=False)
+    base_year = Column(Integer, nullable=False)
+    work_type = Column(String(20), nullable=False, default="project")
+    index_value = Column(Numeric(10, 4), nullable=False)
+    source_ref = Column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("year", "quarter", "base_year", "work_type", name="uq_quarterly_index"),
+    )
+
+
 class BookCondition(Base):
     """Coefficient conditions extracted from a reference book.
 
@@ -106,6 +128,7 @@ class ReferenceBook(Base):
     version = Column(Integer, nullable=False, default=1)
     status = Column(String(30), nullable=False, default="requires_validation")
     is_active = Column(Boolean, nullable=False, default=False)
+    price_base_year = Column(Integer, nullable=False, default=2001)
     parse_prompt = Column(Text, nullable=True)
     pdf_filename = Column(String(500), nullable=True)
     pdf_path = Column(String(1000), nullable=True)

@@ -122,6 +122,7 @@ class ReferenceBookOut(BaseModel):
     version: int
     status: str
     is_active: bool
+    price_base_year: int = 2001
     pdf_filename: Optional[str]
     uploaded_at: datetime
     activated_at: Optional[datetime]
@@ -134,6 +135,7 @@ class ReferenceBookOut(BaseModel):
 class ReferenceBookUpdate(BaseModel):
     notes: Optional[str] = None
     parse_prompt: Optional[str] = None
+    price_base_year: Optional[int] = None
 
 
 class PriceIndexCreate(BaseModel):
@@ -149,6 +151,28 @@ class PriceIndexOut(BaseModel):
     year: int
     quarter: int
     index_type: str
+    index_value: float
+    source_ref: str
+
+    class Config:
+        from_attributes = True
+
+
+class PriceQuarterlyIndexCreate(BaseModel):
+    year: int
+    quarter: int
+    base_year: int
+    work_type: str = "project"
+    index_value: float
+    source_ref: str
+
+
+class PriceQuarterlyIndexOut(BaseModel):
+    id: int
+    year: int
+    quarter: int
+    base_year: int
+    work_type: str
     index_value: float
     source_ref: str
 

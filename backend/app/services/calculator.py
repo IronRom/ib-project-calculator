@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import PriceIndex, ReferenceBook, ReferenceRow
 
 ROMAN = {1: "I", 2: "II", 3: "III", 4: "IV"}
-STAGE_FACTORS = {"П": 0.6, "Р": 0.4, "П+Р": 1.0}
+STAGE_FACTORS = {"П": 0.4, "Р": 0.6, "П+Р": 1.0}
 
 
 def _normalize_unit(u: str) -> str:
@@ -323,6 +323,36 @@ def _fmt_ru(n: float) -> str:
     return s
 
 
+def _get_quarterly_index(db: Session, base_year: int):
+    """Latest project index for a given price base year.
+
+    Falls back to legacy PriceIndex(index_type='project') for base_year=2001
+    when no PriceQuarterlyIndex record exists yet.
+    """
+    from app.models import PriceQuarterlyIndex
+    rec = (
+        db.query(PriceQuarterlyIndex)
+        .filter(
+            PriceQuarterlyIndex.base_year == base_year,
+            PriceQuarterlyIndex.work_type == "project",
+        )
+        .order_by(PriceQuarterlyIndex.year.desc(), PriceQuarterlyIndex.quarter.desc())
+        .first()
+    )
+    if rec:
+        return rec
+    if base_year == 2001:
+        # Legacy fallback: old price_indices table
+        old = (
+            db.query(PriceIndex)
+            .filter(PriceIndex.index_type == "project")
+            .order_by(PriceIndex.year.desc(), PriceIndex.quarter.desc())
+            .first()
+        )
+        return old
+    return None
+
+
 def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     entities = [e for e in entities_dict.get("entities", []) if not e.get("deleted", False)]
 
@@ -371,9 +401,22 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         )
         coeff_factor, applied_coeffs = _apply_coefficients(coefficients)
 
-        # Reference rows values are in тыс. руб. (base year 2001)
-        unit_cost = (a + b * x_calc) * 1000
-        cost = unit_cost * qty * coeff_factor
+        # Per-book price index (base_year → current quarter)
+        base_year = getattr(book, 'price_base_year', 2001) or 2001
+        idx_rec = _get_quarterly_index(db, base_year)
+        idx_value = float(idx_rec.index_value) if idx_rec else 1.0
+        if idx_rec and hasattr(idx_rec, 'quarter'):
+            roman_q = ROMAN.get(idx_rec.quarter, str(idx_rec.quarter))
+            idx_period = f"{roman_q} квартал {idx_rec.year} г."
+            idx_justification = idx_rec.source_ref
+        else:
+            idx_period = "—"
+            idx_justification = f"Индекс к {base_year} не задан"
+
+        # Reference rows in тыс. руб. at book's base year level
+        unit_cost_base = (a + b * x_calc) * 1000   # base rubles (pre-index)
+        cost_base = unit_cost_base * qty * coeff_factor
+        cost = cost_base * idx_value                # current rubles
 
         row_unit = row.x_unit or x_unit or ""
         row_num  = row.row_num or ""
@@ -392,22 +435,17 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             justification += f" [{match.note}]"
         if match.extrapolated and match.x_boundary is not None:
             justification += f"; МУ №620 Прил.1 (X={_fmt_ru(match.x_effective)} {row_unit}, X_расч={_fmt_ru(x_calc)})"
-        # Coefficient references: п. 2.{table_num} (condition text К=value)
         for _name, _val, _short in applied_coeffs:
             para = f"п. 2.{table_num}" if table_num else "п. 1"
             justification += f"; {para} ({_short} К={_fmt_ru(_val)})"
 
         # ── Formula (расчёт стоимости) ────────────────────────────────────────
         a_rub, b_rub = a * 1000, b * 1000
-        # When extrapolated, show x_calc in formula (not x_effective); МУ620 reference in justification
         x_formula = x_calc if (match.extrapolated and match.x_boundary is not None) else match.x_effective
         if b:
             formula = f"({_fmt_ru(a_rub)}+{_fmt_ru(b_rub)}*{_fmt_ru(x_formula)})"
         else:
             formula = _fmt_ru(a_rub)
-        # Show each pricing coefficient separately; group complex into one factor.
-        # МУ №620 п.3.14: ценообразующие — умножаются, усложняющие — суммируются как (1+Σ).
-        # Formula display: ×K_ценообразующий₁ × K_ценообразующий₂ × (1+Σ_усложняющих).
         for _n, _v, _ in applied_coeffs:
             if _n in _PRICING_COEFFS and _v != 1.0:
                 formula += f"×{_fmt_ru(_v)}"
@@ -415,71 +453,88 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         if _complex_vals:
             _cf = 1.0 + sum(_v - 1.0 for _v in _complex_vals)
             formula += f"×{_fmt_ru(_cf)}"
+        if idx_value != 1.0:
+            formula += f"*{_fmt_ru(idx_value)}"
         if qty > 1:
             formula += f"*{qty}"
 
         positions.append({
-            "num":           len(positions) + 1,
-            "name":          object_name,
-            "row_description": row.description or "",
-            "unit":          row_unit,
-            "quantity":      match.x_effective,
-            "item_count":    qty,
-            "justification": justification,
-            "formula":       formula,
-            "cost":          round(cost, 2),
-            "book_code":     book.code,
-            "table_num":     table_num,
-            "row_num":       row_num,
+            "num":                 len(positions) + 1,
+            "name":                object_name,
+            "row_description":     row.description or "",
+            "unit":                row_unit,
+            "quantity":            match.x_effective,
+            "item_count":          qty,
+            "justification":       justification,
+            "formula":             formula,
+            "cost":                round(cost, 2),
+            "cost_base":           round(cost_base, 2),
+            "book_code":           book.code,
+            "price_base_year":     base_year,
+            "price_index":         idx_value,
+            "price_index_period":  idx_period,
+            "price_index_justification": idx_justification,
+            "table_num":           table_num,
+            "row_num":             row_num,
         })
 
-    base_cost = sum(p["cost"] for p in positions)
+    # ── Aggregate ─────────────────────────────────────────────────────────────
+    base_cost    = sum(p["cost_base"] for p in positions)
+    current_cost = sum(p["cost"] for p in positions)
 
-    price_index = (
-        db.query(PriceIndex)
-        .filter(PriceIndex.index_type == "project")
-        .order_by(PriceIndex.year.desc(), PriceIndex.quarter.desc())
-        .first()
-    )
+    # Build index summary keyed by base_year (for 2ПС and frontend display)
+    index_summary: dict[int, dict] = {}
+    for p in positions:
+        by = p["price_base_year"]
+        if by not in index_summary:
+            index_summary[by] = {
+                "base_year":    by,
+                "index_value":  p["price_index"],
+                "period":       p["price_index_period"],
+                "justification": p["price_index_justification"],
+            }
+
+    # Backward-compat single-index fields (filled when all positions share one index)
+    if len(index_summary) == 1:
+        si = next(iter(index_summary.values()))
+        price_index       = si["index_value"]
+        price_index_period = si["period"]
+        price_index_just  = si["justification"]
+    else:
+        price_index       = None
+        price_index_period = "разные справочники"
+        price_index_just  = "; ".join(
+            f"к {s['base_year']}: {s['index_value']}" for s in index_summary.values()
+        )
+
     vat_rec = (
         db.query(PriceIndex)
         .filter(PriceIndex.index_type == "vat")
         .order_by(PriceIndex.year.desc())
         .first()
     )
-
-    idx_value = float(price_index.index_value) if price_index else 1.0
-    vat_rate  = float(vat_rec.index_value) if vat_rec else 22.0
-
-    if price_index:
-        roman = ROMAN.get(price_index.quarter, str(price_index.quarter))
-        period           = f"{roman} квартал {price_index.year} г."
-        idx_justification = price_index.source_ref
-    else:
-        period            = "—"
-        idx_justification = "Индекс не задан"
+    vat_rate = float(vat_rec.index_value) if vat_rec else 22.0
 
     stage        = entities_dict.get("stage", "П+Р")
     stage_factor = STAGE_FACTORS.get(stage, 1.0)
 
-    current_cost   = round(base_cost * idx_value, 2)
     cost_with_stage = round(current_cost * stage_factor, 2)
-    vat_amount     = round(cost_with_stage * vat_rate / 100, 2)
-    total_with_vat = round(cost_with_stage + vat_amount, 2)
+    vat_amount      = round(cost_with_stage * vat_rate / 100, 2)
+    total_with_vat  = round(cost_with_stage + vat_amount, 2)
 
     return {
-        "positions":                positions,
-        "base_cost":                round(base_cost, 2),
-        "price_index":              idx_value,
-        "price_index_period":       period,
-        "price_index_justification": idx_justification,
-        "stage":                    stage,
-        "stage_factor":             stage_factor,
-        "current_cost":             current_cost,
-        "cost_with_stage":          cost_with_stage,
-        "vat_rate":                 vat_rate,
-        "vat_amount":               vat_amount,
-        "total_with_vat":           total_with_vat,
-        "errors":                   errors,
-        "_price_index_id":          price_index.id if price_index else None,
+        "positions":                 positions,
+        "base_cost":                 round(base_cost, 2),
+        "price_index":               price_index,
+        "price_index_period":        price_index_period,
+        "price_index_justification": price_index_just,
+        "index_summary":             list(index_summary.values()),
+        "stage":                     stage,
+        "stage_factor":              stage_factor,
+        "current_cost":              round(current_cost, 2),
+        "cost_with_stage":           cost_with_stage,
+        "vat_rate":                  vat_rate,
+        "vat_amount":                vat_amount,
+        "total_with_vat":            total_with_vat,
+        "errors":                    errors,
     }

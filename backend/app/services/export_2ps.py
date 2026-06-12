@@ -182,10 +182,24 @@ def generate_2ps_excel(project_name: str, stage: str, result: dict[str, Any]) ->
     _sum_row("Базовая стоимость основных проектных работ (МУ №620 п.2.1.1)",
              result["base_cost"], bold=True, fill=_FILL_TOTAL)
 
-    idx_label = f"Коэффициент пересчета базовой стоимости на {result.get('price_index_period', '—')}"
-    if result.get("price_index_justification"):
-        idx_label += f" ({result['price_index_justification']})"
-    _sum_row(idx_label, result["price_index"])
+    index_summary = result.get("index_summary", [])
+    if len(index_summary) == 1:
+        si = index_summary[0]
+        idx_label = f"Коэффициент пересчета к уровню {si['base_year']} г. на {si.get('period', '—')}"
+        if si.get("justification"):
+            idx_label += f" ({si['justification']})"
+        _sum_row(idx_label, si["index_value"])
+    elif len(index_summary) > 1:
+        for si in index_summary:
+            idx_label = f"Коэффициент пересчета к уровню {si['base_year']} г. на {si.get('period', '—')}"
+            if si.get("justification"):
+                idx_label += f" ({si['justification']})"
+            _sum_row(idx_label, si["index_value"])
+    elif result.get("price_index") is not None:
+        idx_label = f"Коэффициент пересчета базовой стоимости на {result.get('price_index_period', '—')}"
+        if result.get("price_index_justification"):
+            idx_label += f" ({result['price_index_justification']})"
+        _sum_row(idx_label, result["price_index"])
 
     _sum_row("Текущая стоимость основных проектных работ (МУ №620 п.2.2.3)",
              result["current_cost"], bold=True, fill=_FILL_TOTAL)

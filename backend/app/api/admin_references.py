@@ -28,6 +28,7 @@ def list_references(db: Session = Depends(get_db), _: User = Depends(require_adm
 def upload_reference(
     code: str,
     official_name: str,
+    price_base_year: int = 2001,
     file: UploadFile = File(...),
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -50,6 +51,7 @@ def upload_reference(
         code=code,
         official_name=official_name,
         version=next_version,
+        price_base_year=price_base_year,
         pdf_filename=file.filename,
         pdf_path=dest_path,
         status="requires_parsing",
@@ -104,6 +106,8 @@ def update_reference(
         book.notes = body.notes
     if body.parse_prompt is not None:
         book.parse_prompt = body.parse_prompt
+    if body.price_base_year is not None:
+        book.price_base_year = body.price_base_year
     db.commit()
     db.refresh(book)
     return book

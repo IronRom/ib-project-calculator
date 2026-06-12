@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
 from app.database import get_db
-from app.models import PriceIndex, User
-from app.schemas import PriceIndexCreate, PriceIndexOut
+from app.models import PriceIndex, PriceQuarterlyIndex, User
+from app.schemas import PriceIndexCreate, PriceIndexOut, PriceQuarterlyIndexCreate, PriceQuarterlyIndexOut
 
 router = APIRouter(prefix="/admin/indices", tags=["admin"])
 
@@ -80,6 +80,78 @@ def get_current_index(index_type: str = "project", db: Session = Depends(get_db)
     if not idx:
         raise HTTPException(status_code=404, detail="Индексы не найдены. Добавьте в разделе Администрирование.")
     return idx
+
+
+# ── PriceQuarterlyIndex CRUD ─────────────────────────────────────────────────
+
+@router.get("/quarterly", response_model=List[PriceQuarterlyIndexOut])
+def list_quarterly(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return (
+        db.query(PriceQuarterlyIndex)
+        .order_by(
+            PriceQuarterlyIndex.year.desc(),
+            PriceQuarterlyIndex.quarter.desc(),
+            PriceQuarterlyIndex.base_year,
+        )
+        .all()
+    )
+
+
+@router.post("/quarterly", response_model=PriceQuarterlyIndexOut, status_code=201)
+def create_quarterly(
+    body: PriceQuarterlyIndexCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    if body.quarter not in (1, 2, 3, 4):
+        raise HTTPException(status_code=422, detail="Квартал должен быть от 1 до 4")
+    existing = db.query(PriceQuarterlyIndex).filter(
+        PriceQuarterlyIndex.year == body.year,
+        PriceQuarterlyIndex.quarter == body.quarter,
+        PriceQuarterlyIndex.base_year == body.base_year,
+        PriceQuarterlyIndex.work_type == body.work_type,
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Индекс {body.year} Q{body.quarter} к уровню {body.base_year} уже существует",
+        )
+    rec = PriceQuarterlyIndex(**body.model_dump())
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+@router.patch("/quarterly/{index_id}", response_model=PriceQuarterlyIndexOut)
+def update_quarterly(
+    index_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    rec = db.query(PriceQuarterlyIndex).filter(PriceQuarterlyIndex.id == index_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Не найден")
+    for field in ("index_value", "source_ref"):
+        if field in body:
+            setattr(rec, field, body[field])
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+@router.delete("/quarterly/{index_id}", status_code=204)
+def delete_quarterly(
+    index_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    rec = db.query(PriceQuarterlyIndex).filter(PriceQuarterlyIndex.id == index_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Не найден")
+    db.delete(rec)
+    db.commit()
 
 
 @router.get("/stale-warning")
