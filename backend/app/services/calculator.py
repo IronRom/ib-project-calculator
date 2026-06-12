@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import PriceIndex, ReferenceBook, ReferenceRow
+from app.models import AsutpFactorOption, AsutpModule, PriceIndex, ReferenceBook, ReferenceRow
 
 ROMAN = {1: "I", 2: "II", 3: "III", 4: "IV"}
 STAGE_FACTORS = {"П": 0.4, "Р": 0.6, "П+Р": 1.0}
@@ -353,8 +353,126 @@ def _get_quarterly_index(db: Session, base_year: int):
     return None
 
 
+def _calculate_asutp_position(
+    entity: dict[str, Any], book: ReferenceBook, db: Session, stage: str,
+) -> dict[str, Any]:
+    """СБЦП-2001-22 factor-based ASUTP calculation.
+
+    Formula per module: Σ_баллов × S × K × stage_pct
+    Total base: sum of modules (тыс.руб.)
+    Final cost: total_base × Ki (stage already embedded)
+    """
+    asutp_factors: dict[str, str] = entity.get("asutp_factors") or {}
+    asutp_k = float(entity.get("asutp_k") or 1.0)
+    object_name = entity.get("object_name", "АСУТП")
+
+    modules = (
+        db.query(AsutpModule)
+        .filter(AsutpModule.book_version_id == book.id)
+        .order_by(AsutpModule.sort_order)
+        .all()
+    )
+    if not modules:
+        raise ValueError(f"Модули АСУТП не найдены для {book.code}")
+
+    total_base_thous = 0.0
+    module_results = []
+
+    _MODULE_ATTR = {"ОР": "or", "ОО": "oo", "ИО": "io", "ТО": "to", "МО": "mo", "ПО": "po"}
+
+    for mod in modules:
+        score_attr = "score_" + _MODULE_ATTR.get(mod.module_code, mod.module_code.lower())
+
+        if stage == "П":
+            pct = mod.stage_p_min / 100
+        elif stage == "П+Р":
+            pct = 1.0
+        else:  # Р (default)
+            pct = mod.stage_r_min / 100
+
+        total_score = 0
+        for factor_code, option_code in sorted(asutp_factors.items()):
+            opt = (
+                db.query(AsutpFactorOption)
+                .filter(
+                    AsutpFactorOption.book_version_id == book.id,
+                    AsutpFactorOption.factor_code == factor_code,
+                    AsutpFactorOption.option_code == option_code,
+                )
+                .first()
+            )
+            if opt:
+                total_score += getattr(opt, score_attr, None) or 0
+
+        s = float(mod.s_value)
+        module_cost_thous = total_score * s * asutp_k * pct
+        total_base_thous += module_cost_thous
+        module_results.append({
+            "module": mod.module_code, "score": total_score,
+            "s": s, "pct": pct, "cost_thous": module_cost_thous,
+        })
+
+    base_year = book.price_base_year or 2001
+    idx_rec = _get_quarterly_index(db, base_year)
+    idx_value = float(idx_rec.index_value) if idx_rec else 1.0
+
+    cost_rub = total_base_thous * 1000 * idx_value
+
+    if idx_rec and hasattr(idx_rec, 'quarter'):
+        roman_q = ROMAN.get(idx_rec.quarter, str(idx_rec.quarter))
+        idx_period = f"{roman_q} квартал {idx_rec.year} г."
+        idx_just = idx_rec.source_ref
+    else:
+        idx_period = "—"
+        idx_just = f"Индекс к {base_year} не задан"
+
+    # Justification
+    factors_str = "; ".join(f"{k}={v}" for k, v in sorted(asutp_factors.items()))
+    justification = f"{book.code} (АСУТП): {factors_str}"
+    if asutp_k != 1.0:
+        justification += f"; К={_fmt_ru(asutp_k)}"
+
+    # Formula: (ОР:score*S*pct% + ...) = base_thous * Ki
+    parts = []
+    for mr in module_results:
+        if mr["pct"] > 0:
+            parts.append(
+                f"{mr['module']}:{mr['score']}*{_fmt_ru(mr['s'])}*{int(mr['pct']*100)}%"
+                f"={_fmt_ru(mr['cost_thous'])}"
+            )
+    formula = (
+        "(" + "; ".join(parts) + f")={_fmt_ru(total_base_thous)}тыс."
+        f"*{_fmt_ru(idx_value)}"
+    )
+
+    return {
+        "num":                       0,  # will be set by caller
+        "name":                      object_name,
+        "row_description":           "АСУТП (факторный метод, СБЦП-2001-22)",
+        "unit":                      "система",
+        "quantity":                  1.0,
+        "item_count":                1,
+        "justification":             justification,
+        "formula":                   formula,
+        "cost":                      round(cost_rub, 2),
+        "cost_base":                 round(total_base_thous * 1000, 2),
+        "book_code":                 book.code,
+        "price_base_year":           base_year,
+        "price_index":               idx_value,
+        "price_index_period":        idx_period,
+        "price_index_justification": idx_just,
+        "table_num":                 None,
+        "row_num":                   None,
+        "_stage_embedded":           True,   # stage% already applied per-module
+        "_asutp_modules":            module_results,
+    }
+
+
 def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     entities = [e for e in entities_dict.get("entities", []) if not e.get("deleted", False)]
+
+    stage        = entities_dict.get("stage", "П+Р")
+    stage_factor = STAGE_FACTORS.get(stage, 1.0)
 
     positions = []
     errors = []
@@ -368,13 +486,23 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         object_name    = entity.get("object_name", "")
         qty            = max(1, int(entity.get("quantity") or 1))
 
-        if not table_num:
-            errors.append(f"{object_name}: не определена таблица СБЦП")
-            continue
-
         book = _find_active_book(db, sbts_code)
         if not book:
             errors.append(f"{object_name}: активный справочник «{sbts_code}» не найден")
+            continue
+
+        # ── ASUTP factor-based path (no table_num needed) ────────────────────
+        if getattr(book, 'calc_method', 'standard') == 'asutp':
+            try:
+                pos = _calculate_asutp_position(entity, book, db, stage)
+                pos["num"] = len(positions) + 1
+                positions.append(pos)
+            except ValueError as exc:
+                errors.append(f"{object_name}: {exc}")
+            continue
+
+        if not table_num:
+            errors.append(f"{object_name}: не определена таблица СБЦП")
             continue
 
         match = _match_row(db, book.id, table_num, x_value, x_unit, object_type_id)
@@ -482,6 +610,10 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     base_cost    = sum(p["cost_base"] for p in positions)
     current_cost = sum(p["cost"] for p in positions)
 
+    # ASUTP positions have stage% already embedded — don't double-apply stage_factor
+    _standard_cost = sum(p["cost"] for p in positions if not p.get("_stage_embedded"))
+    _asutp_cost    = sum(p["cost"] for p in positions if p.get("_stage_embedded"))
+
     # Build index summary keyed by base_year (for 2ПС and frontend display)
     index_summary: dict[int, dict] = {}
     for p in positions:
@@ -515,10 +647,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     )
     vat_rate = float(vat_rec.index_value) if vat_rec else 22.0
 
-    stage        = entities_dict.get("stage", "П+Р")
-    stage_factor = STAGE_FACTORS.get(stage, 1.0)
-
-    cost_with_stage = round(current_cost * stage_factor, 2)
+    cost_with_stage = round(_standard_cost * stage_factor + _asutp_cost, 2)
     vat_amount      = round(cost_with_stage * vat_rate / 100, 2)
     total_with_vat  = round(cost_with_stage + vat_amount, 2)
 

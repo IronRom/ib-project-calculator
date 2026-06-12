@@ -129,6 +129,7 @@ class ReferenceBook(Base):
     status = Column(String(30), nullable=False, default="requires_validation")
     is_active = Column(Boolean, nullable=False, default=False)
     price_base_year = Column(Integer, nullable=False, default=2001)
+    calc_method = Column(String(20), nullable=False, default="standard")  # standard | asutp
     parse_prompt = Column(Text, nullable=True)
     pdf_filename = Column(String(500), nullable=True)
     pdf_path = Column(String(1000), nullable=True)
@@ -204,6 +205,54 @@ class Calculation(Base):
     project = relationship("Project", back_populates="calculations")
     book = relationship("ReferenceBook")
     price_index = relationship("PriceIndex")
+
+
+class AsutpFactorOption(Base):
+    """Factor score options for ASUTP calculation (СБЦП-2001-22 Table 2).
+
+    factor_code: 'Ф2', 'Ф5', 'Ф6', 'Ф7', 'Ф8', 'Ф9', 'Ф10'
+    option_code: 'п.1.1', 'п.2.2', ... (section.row in Table 2)
+    score_*: ball score per module column (ОР, ОО, ИО, ТО, МО, ПО)
+    """
+    __tablename__ = "asutp_factor_options"
+
+    id = Column(Integer, primary_key=True, index=True)
+    book_version_id = Column(Integer, ForeignKey("reference_books.id"), nullable=False, index=True)
+    factor_code = Column(String(5), nullable=False)
+    factor_name = Column(Text, nullable=False)
+    option_code = Column(String(20), nullable=False)
+    option_description = Column(Text, nullable=False)
+    score_or = Column(Integer, nullable=True)
+    score_oo = Column(Integer, nullable=True)
+    score_io = Column(Integer, nullable=True)
+    score_to = Column(Integer, nullable=True)
+    score_mo = Column(Integer, nullable=True)
+    score_po = Column(Integer, nullable=True)
+
+    book = relationship("ReferenceBook")
+
+
+class AsutpModule(Base):
+    """Module definitions for ASUTP calculation: S value + stage percentages per module.
+
+    module_code: 'ОР', 'ОО', 'ИО', 'ТО', 'МО', 'ПО'
+    s_value: cost multiplier тыс.руб. (from СБЦП-2001-22 п.2.11.2)
+    stage_r_min/max: allowed % range for Р (рабочая) stadia
+    stage_p_min/max: allowed % range for П (проектная) stadia
+    """
+    __tablename__ = "asutp_modules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    book_version_id = Column(Integer, ForeignKey("reference_books.id"), nullable=False, index=True)
+    module_code = Column(String(5), nullable=False)
+    s_value = Column(Numeric(10, 2), nullable=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+    stage_r_min = Column(Integer, nullable=False, default=0)
+    stage_r_max = Column(Integer, nullable=False, default=100)
+    stage_p_min = Column(Integer, nullable=False, default=0)
+    stage_p_max = Column(Integer, nullable=False, default=100)
+
+    book = relationship("ReferenceBook")
 
 
 class AuditLog(Base):
