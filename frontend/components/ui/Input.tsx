@@ -9,9 +9,12 @@ interface InputProps {
   required?: boolean
   error?: string
   style?: CSSProperties
+  step?: string | number
+  min?: string | number
+  max?: string | number
 }
 
-export function Input({ label, type = 'text', value, onChange, placeholder, required, error, style }: InputProps) {
+export function Input({ label, type = 'text', value, onChange, placeholder, required, error, style, step, min, max }: InputProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, ...style }}>
       {label && (
@@ -26,6 +29,9 @@ export function Input({ label, type = 'text', value, onChange, placeholder, requ
         onChange={onChange}
         placeholder={placeholder}
         required={required}
+        step={step}
+        min={min}
+        max={max}
         style={{
           width: '100%',
           background: 'var(--bg-input)',
