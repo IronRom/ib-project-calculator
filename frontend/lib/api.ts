@@ -350,6 +350,23 @@ export function getUnitCheck(projectId: number, calcId: number) {
   return request<UnitCheckItem[]>(`/projects/${projectId}/calculations/${calcId}/unit-check`)
 }
 
+export function getIgiBookRows(
+  projectId: number, calcId: number, bookCode = 'НЗ-2025-МС281-ИГИ'
+) {
+  return request<IgiBookRows>(
+    `/projects/${projectId}/calculations/${calcId}/igi/book-rows?book_code=${encodeURIComponent(bookCode)}`
+  )
+}
+
+export function saveGeologicalSurveys(
+  projectId: number, calcId: number, surveys: GeologicalSurvey[]
+): Promise<CalculationResult> {
+  return request<CalculationResult>(
+    `/projects/${projectId}/calculations/${calcId}/geological-surveys`,
+    { method: 'PATCH', body: JSON.stringify({ geological_surveys: surveys }) }
+  )
+}
+
 export function listIndices() {
   return request<PriceIndex[]>('/admin/indices')
 }
@@ -482,6 +499,56 @@ export interface CalculationResult {
   vat_amount: number
   total_with_vat: number
   errors: string[]
+}
+
+// ── ИГИ (geological survey) ───────────────────────────────────────────────────
+
+export type IgiWorkCategory = 'field' | 'lab' | 'kameral' | 'program'
+
+export interface IgiItem {
+  work_category: IgiWorkCategory
+  object_type_name: string
+  table_num: number
+  row_num: string
+  description: string
+  volume: number
+  x_unit: string
+  b: number
+  deleted?: boolean
+  notes?: string
+}
+
+export interface GeologicalSurvey {
+  book_id: number
+  book_code: string
+  complexity_category: number   // 1 | 2 | 3
+  k1: number
+  winter_pct: number
+  k2: number
+  items: IgiItem[]
+}
+
+export interface IgiBookRow {
+  id: number
+  row_num: string
+  description: string
+  x_unit: string
+  x_min: number | null
+  x_max: number | null
+  b: number
+}
+
+export interface IgiObjectType {
+  object_type_id: number
+  object_type_name: string
+  table_num: number
+  rows: IgiBookRow[]
+}
+
+export interface IgiBookRows {
+  book_id: number
+  book_code: string
+  object_types: IgiObjectType[]
 }
 
 export interface PriceIndex {
