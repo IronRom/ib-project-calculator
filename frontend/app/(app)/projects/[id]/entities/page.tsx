@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
   getCalculation, getProject, computeCalculation, downloadExport2PS, patchEntity,
@@ -43,6 +43,22 @@ const COL_UNIT  = '90px'
 const COL_XTBL  = '130px'
 const COL_CONF  = '80px'
 const COL_ACT   = '80px'
+
+function groupBySections(entities: ExtractedEntity[]) {
+  const sections: Map<number, { name: string; indices: number[] }> = new Map()
+  entities.forEach((e, i) => {
+    const num = e.section_num ?? 0
+    const name = e.section_name ?? ''
+    if (!sections.has(num)) sections.set(num, { name, indices: [] })
+    sections.get(num)!.indices.push(i)
+  })
+  // Staged groups (1,2,3...) first, ungrouped (0) last
+  return [...sections.entries()].sort(([a], [b]) => {
+    if (a === 0) return 1
+    if (b === 0) return -1
+    return a - b
+  })
+}
 
 export default function EntitiesPage() {
   const { id } = useParams<{ id: string }>()
@@ -181,6 +197,16 @@ export default function EntitiesPage() {
           </div>
         )}
 
+        {/* used_minimum warning banner */}
+        {calcResult && calcResult.positions.some(p => p.used_minimum) && (
+          <div style={{
+            background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 6,
+            padding: '8px 14px', fontSize: 13, color: '#78350f',
+          }}>
+            ⚠️ Часть позиций рассчитана по минимальным значениям. Уточните параметры для точной стоимости.
+          </div>
+        )}
+
         {/* Entities tables */}
         {entities.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
@@ -200,6 +226,7 @@ export default function EntitiesPage() {
               onOverride={applyOverride}
               theadRow={theadRow}
               makeColGroup={makeColGroup}
+              calcResult={calcResult}
             />
             {/* Suggested */}
             {suggested.length > 0 && (
@@ -215,6 +242,7 @@ export default function EntitiesPage() {
                 onOverride={applyOverride}
                 theadRow={theadRow}
                 makeColGroup={makeColGroup}
+                calcResult={calcResult}
                 warn
               />
             )}
@@ -258,15 +286,28 @@ export default function EntitiesPage() {
 
 // ── Entity table block ────────────────────────────────────────────────────────
 function EntityTable({
-  title, subtitle, entities, subset, unitChecks, overrides, projectId, calcId, onOverride, theadRow, makeColGroup, warn,
+  title, subtitle, entities, subset, unitChecks, overrides, projectId, calcId, onOverride, theadRow, makeColGroup, calcResult, warn,
 }: {
   title: string; subtitle?: string; entities: ExtractedEntity[]; subset: ExtractedEntity[]
   unitChecks: UnitCheckItem[]; overrides: Record<number, EntityOverride>
   projectId: number; calcId: number
   onOverride: (idx: number, patch: Partial<EntityOverride>) => void
-  theadRow: React.ReactNode; makeColGroup: () => React.ReactNode; warn?: boolean
+  theadRow: React.ReactNode; makeColGroup: () => React.ReactNode
+  calcResult: CalculationResult | null; warn?: boolean
 }) {
   const borderColor = warn ? 'var(--warning-500)' : 'var(--border-default)'
+
+  // Build section groups from the subset (using global indices into entities array)
+  const subsetGlobalIndices = subset.map(e => entities.indexOf(e))
+  const subsetEntitiesForGrouping = subsetGlobalIndices.map(gi => entities[gi])
+  // groupBySections uses array index relative to subsetEntitiesForGrouping,
+  // so we need a mapping back to global indices
+  const sections = groupBySections(subsetEntitiesForGrouping)
+  const hasMultipleSections = sections.some(([num]) => num > 0)
+
+  // Column count for colSpan (9 columns total)
+  const COL_COUNT = 9
+
   return (
     <div style={{ background: 'var(--bg-elevated)', border: `1px solid ${borderColor}`, borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
       <div style={{ padding: '14px 18px', borderBottom: `1px solid ${borderColor}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: warn ? 'var(--status-warning-bg)' : undefined }}>
@@ -281,23 +322,68 @@ function EntityTable({
           {makeColGroup()}
           <thead style={{ background: 'var(--bg-raised)' }}>{theadRow}</thead>
           <tbody>
-            {subset.map((entity, i) => {
-              const globalIdx = entities.indexOf(entity)
-              const ov = overrides[globalIdx] ?? {}
-              const isDeleted = ov.deleted ?? entity.deleted ?? false
+            {sections.map(([sectionNum, { name, indices: localIndices }]) => {
+              // localIndices are offsets into subsetEntitiesForGrouping; map to global entity indices
+              const globalIndices = localIndices.map(li => subsetGlobalIndices[li])
+              const sectionEntities = globalIndices.map(gi => entities[gi])
+
+              // Compute per-section subtotal from calcResult positions (pos.num is 1-based global index)
+              const sectionCost = calcResult
+                ? globalIndices
+                    .map(gi => calcResult.positions.find(p => p.num === gi + 1)?.cost ?? 0)
+                    .reduce((s, v) => s + v, 0)
+                : 0
+
               return (
-                <EntityRow
-                  key={globalIdx}
-                  entity={entity}
-                  entityIdx={globalIdx}
-                  projectId={projectId}
-                  calcId={calcId}
-                  unitCheck={unitChecks[globalIdx]}
-                  isLast={i === subset.length - 1}
-                  override={ov}
-                  isDeleted={isDeleted}
-                  onOverride={(patch) => onOverride(globalIdx, patch)}
-                />
+                <React.Fragment key={`section-${sectionNum}`}>
+                  {/* Section header row */}
+                  {hasMultipleSections && (
+                    <tr>
+                      <td colSpan={COL_COUNT} style={{
+                        background: '#f0f4ff', padding: '6px 12px',
+                        fontWeight: 600, fontSize: 13, color: '#1e40af',
+                        borderTop: '2px solid #3b82f6',
+                      }}>
+                        {sectionNum === 0 ? 'Без этапа' : `Этап ${sectionNum}${name ? `: ${name}` : ''}`}
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Entity rows for this section */}
+                  {sectionEntities.map((entity, i) => {
+                    const globalIdx = globalIndices[i]
+                    const ov = overrides[globalIdx] ?? {}
+                    const isDeleted = ov.deleted ?? entity.deleted ?? false
+                    // isLast only matters for border; use section subtotal row as visual separator
+                    const isLastOverall = !hasMultipleSections && globalIdx === subsetGlobalIndices[subsetGlobalIndices.length - 1]
+                    return (
+                      <EntityRow
+                        key={globalIdx}
+                        entity={entity}
+                        entityIdx={globalIdx}
+                        projectId={projectId}
+                        calcId={calcId}
+                        unitCheck={unitChecks[globalIdx]}
+                        isLast={hasMultipleSections ? false : isLastOverall}
+                        override={ov}
+                        isDeleted={isDeleted}
+                        onOverride={(patch) => onOverride(globalIdx, patch)}
+                      />
+                    )
+                  })}
+
+                  {/* Section subtotal row */}
+                  {hasMultipleSections && sectionNum > 0 && sectionCost > 0 && (
+                    <tr style={{ background: '#f8fafc' }}>
+                      <td colSpan={COL_COUNT - 1} style={{ padding: '4px 12px', textAlign: 'right', fontSize: 12, color: '#64748b' }}>
+                        Итог этапа:
+                      </td>
+                      <td style={{ padding: '4px 12px', textAlign: 'right', fontWeight: 600, fontSize: 12 }}>
+                        {fmt(sectionCost)}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               )
             })}
           </tbody>
@@ -495,7 +581,23 @@ function ResultTable({ result, tdBase, tdMono, th }: { result: CalculationResult
                 <td style={{ ...tdMono, textAlign: 'right' }}>{pos.quantity}</td>
                 <td style={{ ...tdBase, fontSize: 11, color: 'var(--fg-3)' }}>{pos.justification}</td>
                 <td style={{ ...tdMono, fontSize: 11, color: 'var(--fg-2)', wordBreak: 'break-all' }}>{pos.formula}</td>
-                <td style={{ ...tdMono, textAlign: 'right', fontWeight: 600 }}>{fmt(pos.cost)}</td>
+                <td style={{ ...tdMono, textAlign: 'right', fontWeight: 600 }}>
+                  {pos.used_minimum && (
+                    <span
+                      title="Рассчитано по минимальному X. Уточните параметры для точного расчёта."
+                      style={{
+                        display: 'inline-block', marginRight: 4,
+                        background: '#fef3c7', color: '#92400e',
+                        border: '1px solid #f59e0b', borderRadius: 4,
+                        fontSize: 10, padding: '1px 5px', fontWeight: 600,
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      Минимум
+                    </span>
+                  )}
+                  {fmt(pos.cost)}
+                </td>
               </tr>
             ))}
             <tr><td colSpan={8} style={{ height: 1, background: 'var(--border-strong)', padding: 0 }} /></tr>

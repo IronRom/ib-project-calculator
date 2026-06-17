@@ -202,6 +202,84 @@ export function deleteHint(bookId: number, hintId: number) {
   return request<void>(`/admin/references/${bookId}/hints/${hintId}`, { method: 'DELETE' })
 }
 
+// ── ASUTP admin ───────────────────────────────────────────────────────────────
+
+export interface AsutpFactorOption {
+  id: number
+  factor_code: string
+  factor_name: string
+  option_code: string
+  option_description: string
+  score_or: number | null
+  score_oo: number | null
+  score_io: number | null
+  score_to: number | null
+  score_mo: number | null
+  score_po: number | null
+}
+
+export interface AsutpFactorOptionIn {
+  factor_code: string
+  factor_name: string
+  option_code: string
+  option_description: string
+  score_or?: number | null
+  score_oo?: number | null
+  score_io?: number | null
+  score_to?: number | null
+  score_mo?: number | null
+  score_po?: number | null
+}
+
+export interface AsutpModule {
+  id: number
+  module_code: string
+  s_value: number
+  sort_order: number
+  stage_r_min: number
+  stage_r_max: number
+  stage_p_min: number
+  stage_p_max: number
+}
+
+export interface AsutpModulePatch {
+  s_value?: number
+  stage_r_min?: number
+  stage_r_max?: number
+  stage_p_min?: number
+  stage_p_max?: number
+}
+
+export function listAsutpFactors(bookId: number) {
+  return request<AsutpFactorOption[]>(`/admin/books/${bookId}/asutp-factors`)
+}
+
+export function createAsutpFactor(bookId: number, data: AsutpFactorOptionIn) {
+  return request<AsutpFactorOption>(`/admin/books/${bookId}/asutp-factors`, {
+    method: 'POST', body: JSON.stringify(data),
+  })
+}
+
+export function updateAsutpFactor(bookId: number, optionId: number, data: AsutpFactorOptionIn) {
+  return request<AsutpFactorOption>(`/admin/books/${bookId}/asutp-factors/${optionId}`, {
+    method: 'PUT', body: JSON.stringify(data),
+  })
+}
+
+export function deleteAsutpFactor(bookId: number, optionId: number) {
+  return request<void>(`/admin/books/${bookId}/asutp-factors/${optionId}`, { method: 'DELETE' })
+}
+
+export function listAsutpModules(bookId: number) {
+  return request<AsutpModule[]>(`/admin/books/${bookId}/asutp-modules`)
+}
+
+export function updateAsutpModule(bookId: number, moduleId: number, data: AsutpModulePatch) {
+  return request<AsutpModule>(`/admin/books/${bookId}/asutp-modules/${moduleId}`, {
+    method: 'PUT', body: JSON.stringify(data),
+  })
+}
+
 export function computeCalculation(projectId: number, calcId: number) {
   return request<CalculationResult>(`/projects/${projectId}/calculations/${calcId}/compute`, { method: 'POST' })
 }
@@ -328,6 +406,8 @@ export interface ExtractedEntity {
   tz_quote?: string
   x_value_missing_reason?: string
   deleted?: boolean
+  section_num?: number
+  section_name?: string
 }
 
 export interface ExtractionResult {
@@ -349,6 +429,8 @@ export interface ReferenceBook {
   uploaded_at: string
   activated_at?: string
   notes?: string
+  calc_method?: string
+  price_base_year?: number
 }
 
 export interface CalcPosition {
@@ -363,6 +445,9 @@ export interface CalcPosition {
   book_code: string
   table_num: number
   row_num: string
+  used_minimum?: boolean
+  section_num?: number
+  section_name?: string
 }
 
 export interface CalculationResult {
