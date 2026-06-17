@@ -363,7 +363,7 @@ export function saveGeologicalSurveys(
 ): Promise<CalculationResult> {
   return request<CalculationResult>(
     `/projects/${projectId}/calculations/${calcId}/geological-surveys`,
-    { method: 'PATCH', body: JSON.stringify({ geological_surveys: surveys }) }
+    { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geological_surveys: surveys }) }
   )
 }
 
