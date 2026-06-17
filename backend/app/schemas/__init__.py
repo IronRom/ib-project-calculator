@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -88,6 +90,21 @@ class ExtractedEntity(BaseModel):
     deleted: bool = False                          # soft-delete by user on validation screen
     section_num: int = 0            # 0 = no explicit stage in TZ
     section_name: str = ""          # short stage name ≤60 chars, empty when section_num=0
+
+    @field_validator('sbts_table', mode='before')
+    @classmethod
+    def _parse_sbts_table(cls, v):
+        if v is None or isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            m = re.search(r'\d+', v)
+            return int(m.group()) if m else None
+        return v
+
+    @field_validator('quantity', mode='before')
+    @classmethod
+    def _coerce_quantity(cls, v):
+        return 1 if v is None else v
 
 
 class ExtractionResult(BaseModel):
