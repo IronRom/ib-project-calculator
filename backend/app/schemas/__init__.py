@@ -118,6 +118,7 @@ class ExtractionResult(BaseModel):
     entities: list[ExtractedEntity]
     stage: Literal["П", "Р", "П+Р"] = "П+Р"
     region: str = ""
+    tz_object_name: str = ""   # formal object name from TZ header, e.g. «Система управления...»
     missing_data: list[str] = []
     overall_confidence: float = 0.0
 
@@ -259,3 +260,30 @@ class AsutpModulePatch(BaseModel):
     stage_r_max: Optional[int] = None
     stage_p_min: Optional[int] = None
     stage_p_max: Optional[int] = None
+
+
+# ── ИГИ (geological survey) ───────────────────────────────────────────────────
+
+class IgiItem(BaseModel):
+    """One line item in a geological survey estimate."""
+    work_category: Literal["field", "lab", "kameral", "program"] = "field"
+    object_type_name: str = ""          # display name, e.g. "Бурение колонковым способом"
+    table_num: int
+    row_num: str = ""
+    description: str = ""
+    volume: float
+    x_unit: str = ""                    # unit label from reference_rows, e.g. "п.м"
+    b: float                            # rate in rubles from reference_rows (at base year)
+    deleted: bool = False
+    notes: str = ""
+
+
+class GeologicalSurvey(BaseModel):
+    """One geological survey block attached to a calculation."""
+    book_id: int                        # id of НЗ-2025-МС281-ИГИ (or any future НЗ)
+    book_code: str = ""                 # e.g. "НЗ-2025-МС281-ИГИ"
+    complexity_category: int = 2        # 1 | 2 | 3 (ИГИ conditions category)
+    k1: float = 0.70                    # home-base coefficient (Table 1 НЗ)
+    winter_pct: float = 0.0             # winter surcharge fraction, e.g. 0.29
+    k2: float = 1.0                     # climate zone coefficient (Table 2 НЗ)
+    items: list[IgiItem] = []
