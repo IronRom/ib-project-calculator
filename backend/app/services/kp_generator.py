@@ -327,39 +327,16 @@ def generate_kp_word(
     r.font.size = Pt(12)
     r.font.name = "Times New Roman"
 
-    # ── Signature block ───────────────────────────────────────────────────────
-    sig_table = doc.add_table(rows=1, cols=3)
-    sig_table.style = "Table Grid"
-
-    for cell in sig_table.rows[0].cells:
-        _remove_cell_borders(cell)
-
-    left_cell = sig_table.rows[0].cells[0]
-    left_cell.width = Cm(5)
-    for line in ["С уважением,", "Генеральный директор", "ООО «Интеллект-строй»"]:
-        p = left_cell.add_paragraph()
-        r = p.add_run(line)
-        r.bold = True
-        r.font.size = Pt(12)
-        r.font.name = "Times New Roman"
-
-    mid_cell = sig_table.rows[0].cells[1]
-    mid_cell.width = Cm(8)
-    if _SIGNATURE_IMG.exists():
-        img_para = mid_cell.add_paragraph()
-        img_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = img_para.add_run()
-        run.add_picture(str(_SIGNATURE_IMG), width=Cm(7.5))
-
-    right_cell = sig_table.rows[0].cells[2]
-    right_cell.width = Cm(4)
-    name_para = right_cell.add_paragraph()
-    name_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    name_para.paragraph_format.space_before = Pt(28)
-    r = name_para.add_run("И. А. Подопригора")
-    r.bold = True
-    r.font.size = Pt(12)
-    r.font.name = "Times New Roman"
+    # ── Signature placeholder (no image — signed version is PDF only) ────────
+    sig_p = doc.add_paragraph()
+    sig_p.paragraph_format.space_after = Pt(0)
+    sig_p.paragraph_format.space_before = Pt(6)
+    _add_run(sig_p, "С уважением,", bold=True)
+    sig_p2 = doc.add_paragraph()
+    _add_run(sig_p2, "Генеральный директор  ООО «Интеллект-строй»", bold=True)
+    sig_p3 = doc.add_paragraph()
+    sig_p3.paragraph_format.space_before = Pt(4)
+    _add_run(sig_p3, "_________________________  И. А. Подопригора", bold=True)
 
     buf = io.BytesIO()
     doc.save(buf)
