@@ -91,6 +91,11 @@ class ExtractedEntity(BaseModel):
     section_num: int = 0            # 0 = no explicit stage in TZ
     section_name: str = ""          # short stage name ≤60 chars, empty when section_num=0
 
+    @field_validator('x_unit', 'sbts_code', 'section_name', mode='before')
+    @classmethod
+    def _coerce_str(cls, v):
+        return "" if v is None else v
+
     @field_validator('sbts_table', mode='before')
     @classmethod
     def _parse_sbts_table(cls, v):
