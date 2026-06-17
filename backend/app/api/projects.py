@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.config import settings
 from app.database import get_db
-from app.models import Project, ProjectFile, User
+from app.models import Calculation, Project, ProjectFile, User
 from app.schemas import ProjectCreate, ProjectFileOut, ProjectOut
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -50,7 +50,15 @@ def get_project(
     db: Session = Depends(get_db),
 ):
     project = _get_own_project(project_id, current_user.id, db)
-    return project
+    last_calc = (
+        db.query(Calculation.id)
+        .filter(Calculation.project_id == project.id)
+        .order_by(Calculation.created_at.desc())
+        .first()
+    )
+    out = ProjectOut.model_validate(project)
+    out.last_calculation_id = last_calc[0] if last_calc else None
+    return out
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)

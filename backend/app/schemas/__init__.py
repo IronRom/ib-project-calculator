@@ -58,6 +58,7 @@ class ProjectOut(BaseModel):
     status: str
     created_at: datetime
     files: list[ProjectFileOut] = []
+    last_calculation_id: Optional[int] = None
 
     class Config:
         from_attributes = True

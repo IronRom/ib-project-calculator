@@ -88,6 +88,14 @@ export default function ProjectPage() {
                 Расчёты не активированы
               </span>
             )}
+            {project.last_calculation_id && (
+              <Button
+                variant="secondary"
+                onClick={() => router.push(`/projects/${id}/geology?calc=${project.last_calculation_id}`)}
+              >
+                Добавить ИГИ
+              </Button>
+            )}
             <Button
               variant="primary"
               disabled={!canCalculate || project.files.length === 0 || calculating || orCalculating}

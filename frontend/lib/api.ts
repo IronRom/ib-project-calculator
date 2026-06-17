@@ -415,6 +415,7 @@ export interface Project {
   status: string
   created_at: string
   files: ProjectFile[]
+  last_calculation_id?: number
 }
 
 export interface Calculation {
