@@ -125,6 +125,7 @@ class ReferenceBookOut(BaseModel):
     status: str
     is_active: bool
     price_base_year: int = 2001
+    calc_method: str = "standard"
     pdf_filename: Optional[str]
     uploaded_at: datetime
     activated_at: Optional[datetime]
@@ -180,3 +181,57 @@ class PriceQuarterlyIndexOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ── ASUTP Admin ───────────────────────────────────────────────────────────────
+
+class AsutpFactorOptionOut(BaseModel):
+    id: int
+    factor_code: str
+    factor_name: str
+    option_code: str
+    option_description: str
+    score_or: Optional[int]
+    score_oo: Optional[int]
+    score_io: Optional[int]
+    score_to: Optional[int]
+    score_mo: Optional[int]
+    score_po: Optional[int]
+
+    class Config:
+        from_attributes = True
+
+
+class AsutpFactorOptionIn(BaseModel):
+    factor_code: str
+    factor_name: str
+    option_code: str
+    option_description: str
+    score_or: Optional[int] = None
+    score_oo: Optional[int] = None
+    score_io: Optional[int] = None
+    score_to: Optional[int] = None
+    score_mo: Optional[int] = None
+    score_po: Optional[int] = None
+
+
+class AsutpModuleOut(BaseModel):
+    id: int
+    module_code: str
+    s_value: float
+    sort_order: int
+    stage_r_min: int
+    stage_r_max: int
+    stage_p_min: int
+    stage_p_max: int
+
+    class Config:
+        from_attributes = True
+
+
+class AsutpModulePatch(BaseModel):
+    s_value: Optional[float] = None
+    stage_r_min: Optional[int] = None
+    stage_r_max: Optional[int] = None
+    stage_p_min: Optional[int] = None
+    stage_p_max: Optional[int] = None

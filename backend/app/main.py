@@ -6,7 +6,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, calculations, projects, admin_users, admin_references, admin_indices
+from app.api import auth, calculations, projects, admin_users, admin_references, admin_indices, admin_asutp
 from app.api.auth import hash_password
 from app.config import settings
 from app.database import engine
@@ -58,6 +58,7 @@ app.include_router(calculations.router)
 app.include_router(admin_users.router)
 app.include_router(admin_references.router)
 app.include_router(admin_indices.router)
+app.include_router(admin_asutp.router)
 
 
 @app.get("/health")
