@@ -5,6 +5,7 @@ import { listReferences, activateReference, rollbackReference, exportReferenceEx
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
+import { AsutpTab } from '@/components/admin/AsutpTab'
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -32,6 +33,7 @@ export default function AdminReferencesPage() {
   const [parseState, setParseState] = useState<ParseState | null>(null)
   const [error, setError] = useState('')
   const [expandedHintsId, setExpandedHintsId] = useState<number | null>(null)
+  const [expandedTab, setExpandedTab] = useState<'hints' | 'asutp'>('hints')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const importingBookId = useRef<number | null>(null)
   const esRef = useRef<EventSource | null>(null)
@@ -244,18 +246,54 @@ export default function AdminReferencesPage() {
                             )}
                             <Button
                               size="sm"
-                              variant={expandedHintsId === book.id ? 'primary' : 'secondary'}
-                              onClick={() => setExpandedHintsId(expandedHintsId === book.id ? null : book.id)}
+                              variant={expandedHintsId === book.id && expandedTab === 'hints' ? 'primary' : 'secondary'}
+                              onClick={() => {
+                                if (expandedHintsId === book.id && expandedTab === 'hints') {
+                                  setExpandedHintsId(null)
+                                } else {
+                                  setExpandedHintsId(book.id)
+                                  setExpandedTab('hints')
+                                }
+                              }}
                             >
                               Условия
                             </Button>
+                            {book.calc_method === 'asutp' && (
+                              <Button
+                                size="sm"
+                                variant={expandedHintsId === book.id && expandedTab === 'asutp' ? 'primary' : 'secondary'}
+                                onClick={() => {
+                                  if (expandedHintsId === book.id && expandedTab === 'asutp') {
+                                    setExpandedHintsId(null)
+                                  } else {
+                                    setExpandedHintsId(book.id)
+                                    setExpandedTab('asutp')
+                                  }
+                                }}
+                              >
+                                Факторы АСУТП
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </tr>
                       {expandedHintsId === book.id && (
                         <tr>
                           <td colSpan={6} style={{ padding: 0, background: 'var(--bg-surface)', borderBottom: i < books.length - 1 ? 'var(--hairline)' : 'none' }}>
-                            <HintsPanel bookId={book.id} bookCode={book.code} onClose={() => setExpandedHintsId(null)} />
+                            {expandedTab === 'hints' && (
+                              <HintsPanel bookId={book.id} bookCode={book.code} onClose={() => setExpandedHintsId(null)} />
+                            )}
+                            {expandedTab === 'asutp' && (
+                              <div style={{ padding: '16px 20px', borderTop: '1px solid var(--blue-500)', background: 'var(--bg-surface)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600 }}>
+                                    Факторы АСУТП — <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--blue-300)' }}>{book.code}</span>
+                                  </div>
+                                  <button onClick={() => setExpandedHintsId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-3)', fontSize: 18, lineHeight: 1, padding: '0 4px' }}>×</button>
+                                </div>
+                                <AsutpTab bookId={book.id} />
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )}
