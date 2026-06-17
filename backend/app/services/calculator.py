@@ -72,10 +72,31 @@ class RowMatch:
     used_minimum: bool = False  # True when x_value was None and minimum row was used
 
 
+# Physical units requiring actual dimensional conversion.
+# Any unit NOT in this set is treated as a discrete count (штуки, ячейки, шкафы, etc.)
+# and is 1:1 equivalent to any other discrete unit.
+_PHYSICAL_UNITS: frozenset[str] = frozenset({
+    "м³/сут", "тыс. м³/сут", "м³/ч", "тыс. м³/ч",
+    "л/с", "т/сут", "т/г.", "тыс. т/г.", "км", "м", "п.м",
+    "мвт", "квт", "гкал/ч", "мва", "ква",
+})
+
+
 def _try_convert(x_value: float, from_unit: str, to_unit: str) -> Optional[float]:
-    """Return converted value, or None if no conversion path exists."""
+    """Return converted value, or None if no conversion path exists.
+
+    Discrete (non-physical) units like шт./ячейка/шкаф/пункт are all
+    equivalent — return x_value unchanged (1:1).
+    """
     fn = UNIT_CONVERSIONS.get((from_unit, to_unit))
-    return fn(x_value) if fn is not None else None
+    if fn is not None:
+        return fn(x_value)
+    # Both units are discrete → 1:1 equivalence
+    from_phys = from_unit.lower() in {u.lower() for u in _PHYSICAL_UNITS}
+    to_phys   = to_unit.lower()   in {u.lower() for u in _PHYSICAL_UNITS}
+    if not from_phys and not to_phys:
+        return x_value
+    return None
 
 
 def _match_row(
