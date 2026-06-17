@@ -176,11 +176,17 @@ def unit_check(
     results = []
 
     for i, entity in enumerate(entities):
-        x_value        = float(entity.get("x_value") or 0.0)
-        x_unit         = entity.get("x_unit", "")
+        _x_raw         = entity.get("x_value")
+        x_value        = float(_x_raw) if _x_raw is not None else None
+        x_unit         = entity.get("x_unit") or ""
         table_num      = entity.get("sbts_table")
-        sbts_code      = entity.get("sbts_code", "")
+        sbts_code      = entity.get("sbts_code") or ""
         object_type_id = entity.get("sbts_object_type_id")
+
+        # ASUTP uses factor method — no table, skip unit check
+        if entity.get("asutp_factors"):
+            results.append({"index": i, "ok": True, "note": "АСУТП (факторный метод)"})
+            continue
 
         if not table_num:
             results.append({"index": i, "ok": False, "note": "таблица не определена"})

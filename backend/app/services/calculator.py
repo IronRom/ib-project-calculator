@@ -24,6 +24,7 @@ def _normalize_unit(u: str) -> str:
     u = u.replace("/час", "/ч").replace("/час.", "/ч")
     u = u.replace("/сутки", "/сут").replace("/суток", "/сут")
     u = re.sub(r"пог\.?\s*", "", u)   # "пог. м" → "м"
+    u = re.sub(r"\.\s*$", "", u)       # strip trailing abbreviation dot: "п.м." → "п.м"
     return u.strip()
 
 
@@ -296,7 +297,8 @@ def _apply_coefficients(coefficients: list[dict]) -> tuple[float, list[tuple[str
     return combined, applied
 
 
-_CODE_PREFIX = re.compile(r'^(сбцп|сбц|мрр)\s+', re.IGNORECASE)
+_CODE_PREFIX    = re.compile(r'^(сбцп|сбц|мрр)\s+', re.IGNORECASE)
+_CODE_TYPE_YEAR = re.compile(r'^(нз|сбцп|сбц|мрр)[\s\-]+(\d{4})', re.IGNORECASE)
 
 
 def _normalize_code(code: str) -> str:
@@ -304,15 +306,41 @@ def _normalize_code(code: str) -> str:
 
 
 def _find_active_book(db: Session, sbts_code: str) -> Optional[ReferenceBook]:
-    """Find active book by code. Handles prefix variants on both sides (СБЦП/СБЦ/МРР)."""
+    """Find active book by code. Handles prefix variants and abbreviated codes.
+
+    Matching order:
+    1. Exact string match
+    2. Prefix-normalized match (strips СБЦП/СБЦ/МРР prefix)
+    3. Type+year fuzzy match: НЗ-2021-ЗС → НЗ-2021-МС847-СИТО when only one НЗ-2021 book exists
+    """
     if not sbts_code:
         return None
+
+    all_active = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
+    q_lower = sbts_code.strip().lower()
     query_norm = _normalize_code(sbts_code)
-    for book in db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all():
-        if book.code.strip().lower() == sbts_code.strip().lower():
+
+    for book in all_active:
+        if book.code.strip().lower() == q_lower:
             return book  # exact
+    for book in all_active:
         if _normalize_code(book.code) == query_norm:
             return book  # prefix-normalized
+
+    # Fuzzy: match by type+year when abbreviation used (e.g. НЗ-2021-ЗС → НЗ-2021-МС847-СИТО)
+    m = _CODE_TYPE_YEAR.match(sbts_code.strip())
+    if m:
+        q_type = m.group(1).lower()
+        q_year = m.group(2)
+        candidates = [
+            b for b in all_active
+            if (bm := _CODE_TYPE_YEAR.match(b.code.strip()))
+            and bm.group(1).lower() == q_type
+            and bm.group(2) == q_year
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+
     return None
 
 
