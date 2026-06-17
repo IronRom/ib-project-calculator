@@ -12,16 +12,21 @@ Formula per work category:
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+import re
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.models import PriceQuarterlyIndex, ReferenceRow
 
+_CAT_ROW_RANGES = {1: (1, 7), 2: (8, 15), 3: (16, 24)}
+_RE_ROW_NUM = re.compile(r'п\.(\d+)')
 
-def _get_survey_index(db: Session, book_id: int) -> tuple[float, str, str]:
+
+def _get_survey_index(db: Session) -> tuple[float, str, str]:
     """Return (index_value, period_label, source_ref) for survey work, base_year=2024.
 
+    Survey index is global (not per-book).
     Looks up PriceQuarterlyIndex with work_type='survey', base_year=2024.
     Falls back to 1.0 if not configured.
     """
@@ -42,7 +47,7 @@ def _get_survey_index(db: Session, book_id: int) -> tuple[float, str, str]:
 
 
 def _lookup_report_cost(
-    db: Session, book_id: int, kameral_total_rub: float, complexity_cat: int,
+    db: Session, book_version_id: int, kameral_total_rub: float, complexity_cat: int,
 ) -> float:
     """Lookup Таблица 65 НЗ-2025-МС281-ИГИ: cost of technical report.
 
@@ -50,23 +55,19 @@ def _lookup_report_cost(
     Returns cost in rubles at base year level (before index).
 
     Row structure in DB: x_min/x_max = тыс.руб thresholds, b = cost (руб).
-    Interpolates linearly between reference points.
+    Step-lookup: returns b of the first row where x_max >= X (тыс.руб threshold).
     complexity_cat determines which row set (I → п.1-7, II → п.8-15, III → п.16-24).
     """
     kameral_thous = kameral_total_rub / 1000
 
     # Determine row_num range by complexity category
     # Cat I: п.1-п.7, Cat II: п.8-п.15, Cat III: п.16-п.24
-    _CAT_ROW_RANGES = {1: (1, 7), 2: (8, 15), 3: (16, 24)}
     lo_p, hi_p = _CAT_ROW_RANGES.get(complexity_cat, (8, 15))
-
-    import re
-    _RE = re.compile(r'п\.(\d+)')
 
     rows: list[ReferenceRow] = (
         db.query(ReferenceRow)
         .filter(
-            ReferenceRow.book_version_id == book_id,
+            ReferenceRow.book_version_id == book_version_id,
             ReferenceRow.table_num == 65,
         )
         .all()
@@ -74,7 +75,7 @@ def _lookup_report_cost(
     # Filter to complexity category rows by row_num parse
     cat_rows = []
     for r in rows:
-        m = _RE.search(r.row_num or "")
+        m = _RE_ROW_NUM.search(r.row_num or "")
         if m and lo_p <= int(m.group(1)) <= hi_p:
             cat_rows.append(r)
 
@@ -105,23 +106,23 @@ def calculate_igi(
     positions: list[dict[str, Any]] = []
     errors: list[str] = []
 
-    for survey in geological_surveys:
-        book_id = survey.get("book_id")
-        if not book_id:
-            errors.append("ИГИ: не указан book_id справочника")
+    for i, survey in enumerate(geological_surveys):
+        book_version_id = survey.get("book_id")
+        if not book_version_id:
+            errors.append(f"ИГИ [survey #{i}]: не указан book_id справочника")
             continue
 
-        book_code = survey.get("book_code", f"book#{book_id}")
+        book_code = survey.get("book_code", f"book#{book_version_id}")
         k1 = float(survey.get("k1", 0.70))
         winter_pct = float(survey.get("winter_pct", 0.0))
         k2 = float(survey.get("k2", 1.0))
         complexity_cat = int(survey.get("complexity_category", 2))
 
-        index_val, idx_period, idx_just = _get_survey_index(db, book_id)
+        index_val, idx_period, idx_just = _get_survey_index(db)
 
         kameral_total_base = 0.0  # running total for report lookup (at base level)
 
-        items = [i for i in survey.get("items", []) if not i.get("deleted")]
+        items = [it for it in survey.get("items", []) if not it.get("deleted")]
 
         for item in items:
             work_cat = item.get("work_category", "field")
@@ -189,7 +190,7 @@ def calculate_igi(
 
         # Auto-append technical report if there are kameral items
         if kameral_total_base > 0:
-            report_cost_base = _lookup_report_cost(db, book_id, kameral_total_base, complexity_cat)
+            report_cost_base = _lookup_report_cost(db, book_version_id, kameral_total_base, complexity_cat)
             report_cost = report_cost_base * index_val
             if report_cost > 0:
                 positions.append({
