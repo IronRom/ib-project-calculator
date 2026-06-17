@@ -3,7 +3,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
-  getCalculation, getProject, computeCalculation, downloadExport2PS, patchEntity,
+  getCalculation, getProject, computeCalculation, correctAndCompute,
+  downloadExport2PS, downloadExportKP, patchEntity,
   getUnitCheck, Calculation, ExtractedEntity, CalculationResult,
   CalcPosition, Project, UnitCheckItem,
 } from '@/lib/api'
@@ -75,6 +76,8 @@ export default function EntitiesPage() {
   const [unitChecks, setUnitChecks] = useState<UnitCheckItem[]>([])
   const [overrides, setOverrides]   = useState<Record<number, EntityOverride>>({})
   const [dirty, setDirty]           = useState(false)
+  const [correctionText, setCorrectionText] = useState('')
+  const [correcting, setCorrecting] = useState(false)
 
   useEffect(() => {
     if (!calcId) return
@@ -122,6 +125,21 @@ export default function EntitiesPage() {
       setCalcError(e instanceof Error ? e.message : 'Ошибка расчёта')
     } finally {
       setComputing(false)
+    }
+  }
+
+  async function handleCorrect() {
+    if (!correctionText.trim()) return
+    setCorrecting(true); setCalcError('')
+    try {
+      const r = await correctAndCompute(Number(id), Number(calcId), correctionText)
+      setCalcResult(r)
+      setCorrectionText('')
+      getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks)
+    } catch (e: unknown) {
+      setCalcError(e instanceof Error ? e.message : 'Ошибка корректировки')
+    } finally {
+      setCorrecting(false)
     }
   }
 
@@ -249,21 +267,52 @@ export default function EntitiesPage() {
           </div>
         )}
 
-        {/* Recalculate button */}
+        {/* Correction text field + Recalculate */}
         {entities.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <Button variant="primary" disabled={computing || !calcId} onClick={handleCompute}>
-              {computing ? 'Расчёт…' : calcResult ? 'Пересчитать' : 'Рассчитать стоимость ПИР'}
-            </Button>
-            {calcResult && calcId && (
-              <Button variant="secondary" onClick={() => downloadExport2PS(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
-                ↓ 2ПС ИР
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {calcResult && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <textarea
+                  value={correctionText}
+                  onChange={e => setCorrectionText(e.target.value)}
+                  placeholder="Комментарий для корректировки AI (необязательно): например «АСУТП: Ф7=п.4.3, Ф9=п.6.2» или «ячеек 20 шт, кабелей 300 п.м»"
+                  rows={2}
+                  style={{
+                    flex: 1, padding: '8px 10px', fontSize: 13,
+                    border: '1px solid var(--border-2)', borderRadius: 'var(--radius-md)',
+                    resize: 'vertical', fontFamily: 'inherit', color: 'var(--fg-1)',
+                    background: 'var(--surface-1)',
+                  }}
+                />
+                <Button
+                  variant="secondary"
+                  disabled={correcting || !correctionText.trim()}
+                  onClick={handleCorrect}
+                  style={{ whiteSpace: 'nowrap', alignSelf: 'flex-end' }}
+                >
+                  {correcting ? 'Корректировка…' : 'Скорректировать и пересчитать'}
+                </Button>
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <Button variant="primary" disabled={computing || !calcId} onClick={handleCompute}>
+                {computing ? 'Расчёт…' : calcResult ? 'Пересчитать' : 'Рассчитать стоимость ПИР'}
               </Button>
-            )}
-            {dirty && !computing && (
-              <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Нажмите, чтобы применить изменения</span>
-            )}
-            {calcError && <span style={{ fontSize: 13, color: 'var(--danger-400)' }}>{calcError}</span>}
+              {calcResult && calcId && (
+                <>
+                  <Button variant="secondary" onClick={() => downloadExport2PS(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
+                    ↓ 2ПС ИР
+                  </Button>
+                  <Button variant="secondary" onClick={() => downloadExportKP(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
+                    ↓ КП
+                  </Button>
+                </>
+              )}
+              {dirty && !computing && (
+                <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Нажмите, чтобы применить изменения</span>
+              )}
+              {calcError && <span style={{ fontSize: 13, color: 'var(--danger-400)' }}>{calcError}</span>}
+            </div>
           </div>
         )}
 

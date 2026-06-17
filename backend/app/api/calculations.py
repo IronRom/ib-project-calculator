@@ -243,6 +243,134 @@ def export_2ps(
     )
 
 
+@router.post("/{calc_id}/correct-and-compute")
+def correct_and_compute(
+    project_id: int,
+    calc_id: int,
+    body: dict,
+    current_user: User = Depends(require_calculate),
+    db: Session = Depends(get_db),
+):
+    """Apply AI-based correction to entities, then recalculate.
+
+    Body: {"correction_text": "...user instructions..."}
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.services.calculator import calculate
+    from app.config import settings
+    import anthropic
+    import json
+
+    correction_text = (body.get("correction_text") or "").strip()
+    if not correction_text:
+        raise HTTPException(status_code=422, detail="correction_text обязателен")
+
+    project = _get_own_project(project_id, current_user.id, db)
+    calc = db.query(Calculation).filter(
+        Calculation.id == calc_id, Calculation.project_id == project.id
+    ).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+    if not calc.extracted_entities:
+        raise HTTPException(status_code=422, detail="Сначала запустите извлечение сущностей")
+
+    entities = (calc.extracted_entities or {}).get("entities", [])
+    entities_json = json.dumps(entities, ensure_ascii=False, indent=2)
+
+    # Build calc summary for context
+    calc_summary = ""
+    if calc.calculation_result:
+        positions = calc.calculation_result.get("positions", [])
+        errors = calc.calculation_result.get("errors", [])
+        lines = []
+        for p in positions:
+            lines.append(f"  #{p.get('num')} {p.get('name')}: {p.get('cost', 0):,.0f} руб. (обосн: {p.get('justification','')})")
+        if errors:
+            lines.append("Ошибки: " + "; ".join(errors))
+        calc_summary = "\n".join(lines)
+
+    prompt = f"""Ты опытный сметчик ПИР. Пользователь хочет скорректировать список позиций.
+
+ТЕКУЩИЕ ПОЗИЦИИ (JSON):
+{entities_json}
+
+РЕЗУЛЬТАТ ПОСЛЕДНЕГО РАСЧЁТА:
+{calc_summary or "расчёт ещё не выполнялся"}
+
+КОММЕНТАРИЙ ПОЛЬЗОВАТЕЛЯ:
+{correction_text}
+
+ЗАДАЧА: Скорректируй список позиций согласно комментарию пользователя.
+Можно изменять: x_value, x_unit, asutp_factors, asutp_k, coefficients, section_num, section_name, quantity, deleted.
+НЕ изменяй: category, sbts_code, sbts_table, object_type (если только пользователь не просит).
+
+Верни ТОЛЬКО валидный JSON массив позиций (тот же формат, что и входной список entities).
+Никаких пояснений — только JSON."""
+
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    msg = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4096,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    response_text = msg.content[0].text.strip()
+
+    # Extract JSON from response
+    import re
+    json_match = re.search(r'\[[\s\S]+\]', response_text)
+    if not json_match:
+        raise HTTPException(status_code=422, detail="AI не вернул корректный JSON список позиций")
+
+    try:
+        corrected_entities = json.loads(json_match.group(0))
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=422, detail=f"Ошибка парсинга JSON от AI: {e}")
+
+    # Save corrected entities
+    calc.extracted_entities["entities"] = corrected_entities
+    flag_modified(calc, "extracted_entities")
+
+    # Recalculate
+    result = calculate(calc.extracted_entities, db)
+    calc.price_index_id = result.pop("_price_index_id", None)
+    calc.calculation_result = result
+    db.commit()
+    return result
+
+
+@router.get("/{calc_id}/export-kp")
+def export_kp(
+    project_id: int,
+    calc_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.services.kp_generator import generate_kp_word
+    project = _get_own_project(project_id, current_user.id, db)
+    calc = db.query(Calculation).filter(
+        Calculation.id == calc_id, Calculation.project_id == project.id
+    ).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+    if not calc.calculation_result:
+        raise HTTPException(status_code=422, detail="Сначала выполните расчёт")
+
+    stage = (calc.extracted_entities or {}).get("stage", "П+Р")
+    docx_bytes = generate_kp_word(
+        project_name=project.name,
+        stage=stage,
+        result=calc.calculation_result,
+    )
+
+    safe_name = urllib.parse.quote(f"КП_{project.name}.docx")
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}"},
+    )
+
+
 @router.get("/{calc_id}", response_model=CalculationOut)
 def get_calculation(
     project_id: int,
