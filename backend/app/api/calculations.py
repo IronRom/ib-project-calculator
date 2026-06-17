@@ -205,6 +205,7 @@ def list_igi_book_rows(
             "object_type_id": ot.id,
             "object_type_name": ot.name,
             "table_num": ot.table_num,
+            "work_category": getattr(ot, "work_category", "field"),
             "rows": [
                 {
                     "id": r.id,

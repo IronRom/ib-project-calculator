@@ -10,17 +10,7 @@ import {
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
 
-type IgiWorkCategory2 = IgiWorkCategory  // alias for readability
-
-const WORK_CATEGORY_BY_TABLE: Record<number, IgiWorkCategory2> = {
-  12: 'field', 14: 'field', 16: 'field', 18: 'field',
-  43: 'field', 47: 'field', 50: 'field', 52: 'field', 54: 'field',
-  56: 'lab', 57: 'lab', 58: 'lab', 59: 'lab', 60: 'lab', 61: 'lab',
-  62: 'kameral', 63: 'lab', 64: 'kameral',
-  66: 'program',
-}
-
-const CAT_LABELS: Record<IgiWorkCategory2, string> = {
+const CAT_LABELS: Record<IgiWorkCategory, string> = {
   field: 'Полевые',
   lab: 'Лабораторные',
   kameral: 'Камеральные',
@@ -39,7 +29,7 @@ export default function GeologyPage() {
   const [bookData, setBookData] = useState<{ bookId: number; bookCode: string; objectTypes: IgiObjectType[] } | null>(null)
   const [survey, setSurvey] = useState<GeologicalSurvey>({
     book_id: 0,
-    book_code: 'НЗ-2025-МС281-ИГИ',
+    book_code: '',
     complexity_category: 2,
     k1: 0.70,
     winter_pct: 0.29,
@@ -68,7 +58,7 @@ export default function GeologyPage() {
     const vol = parseFloat(pickerVolume)
     if (isNaN(vol) || vol <= 0) return
 
-    const workCat = WORK_CATEGORY_BY_TABLE[pickerOtype.table_num] ?? 'field'
+    const workCat = (pickerOtype.work_category as IgiWorkCategory) || 'field'
     const item: IgiItem = {
       work_category: workCat,
       object_type_name: pickerOtype.object_type_name,
@@ -105,9 +95,14 @@ export default function GeologyPage() {
     }
   }
 
-  const igiTotal = result?.positions
-    ?.filter(p => (p as any).section_name === 'ИГИ')
-    ?.reduce((s, p) => s + p.cost, 0) ?? null
+  const igiPositions = result?.positions?.filter(p => p.section_name === 'ИГИ') ?? []
+  const igiTotal = igiPositions.length > 0 ? igiPositions.reduce((s, p) => s + p.cost, 0) : null
+
+  if (!calcId) return (
+    <div className="min-h-screen bg-neutral-950 text-white flex items-center justify-center">
+      <p className="text-neutral-400">Откройте страницу из расчёта (параметр ?calc= отсутствует)</p>
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white">
@@ -238,7 +233,7 @@ export default function GeologyPage() {
               </thead>
               <tbody>
                 {survey.items.map((item, i) => (
-                  <tr key={i} className="border-b border-neutral-800/50 hover:bg-neutral-800/40">
+                  <tr key={`${item.table_num}-${item.row_num}-${i}`} className="border-b border-neutral-800/50 hover:bg-neutral-800/40">
                     <td className="px-4 py-2">
                       <span className="text-xs bg-neutral-700 rounded px-2 py-0.5">
                         {CAT_LABELS[item.work_category]}
@@ -271,7 +266,7 @@ export default function GeologyPage() {
         {error && <p className="text-red-400 mb-4 text-sm">{error}</p>}
 
         <div className="flex gap-4 items-center">
-          <Button onClick={handleSave} disabled={saving || survey.items.length === 0}>
+          <Button onClick={handleSave} disabled={saving || survey.items.length === 0 || survey.book_id === 0}>
             {saving ? 'Сохраняю…' : 'Сохранить и рассчитать'}
           </Button>
           {igiTotal !== null && (
@@ -282,7 +277,7 @@ export default function GeologyPage() {
         </div>
 
         {/* Result positions */}
-        {result && result.positions.filter(p => (p as any).section_name === 'ИГИ').length > 0 && (
+        {igiPositions.length > 0 && (
           <div className="mt-8">
             <h2 className="font-medium mb-4 text-neutral-300">Результат расчёта ИГИ</h2>
             <div className="bg-neutral-900 rounded-xl overflow-x-auto">
@@ -296,16 +291,14 @@ export default function GeologyPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {result.positions
-                    .filter(p => (p as any).section_name === 'ИГИ')
-                    .map(p => (
-                      <tr key={p.num} className="border-b border-neutral-800/50">
-                        <td className="px-4 py-2 text-neutral-400">{p.num}</td>
-                        <td className="px-4 py-2">{p.name}</td>
-                        <td className="px-4 py-2 text-neutral-400 text-xs">{p.justification}</td>
-                        <td className="px-4 py-2 text-right font-mono">{fmt(p.cost)}</td>
-                      </tr>
-                    ))}
+                  {igiPositions.map(p => (
+                    <tr key={p.num} className="border-b border-neutral-800/50">
+                      <td className="px-4 py-2 text-neutral-400">{p.num}</td>
+                      <td className="px-4 py-2">{p.name}</td>
+                      <td className="px-4 py-2 text-neutral-400 text-xs">{p.justification}</td>
+                      <td className="px-4 py-2 text-right font-mono">{fmt(p.cost)}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

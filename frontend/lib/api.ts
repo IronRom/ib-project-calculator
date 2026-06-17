@@ -542,6 +542,7 @@ export interface IgiObjectType {
   object_type_id: number
   object_type_name: string
   table_num: number
+  work_category: string
   rows: IgiBookRow[]
 }
 
