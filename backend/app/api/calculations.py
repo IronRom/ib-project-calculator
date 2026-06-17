@@ -170,6 +170,13 @@ def list_igi_book_rows(
     """
     from app.models import BookObjectType, ReferenceBook, ReferenceRow
 
+    project = _get_own_project(project_id, current_user.id, db)
+    calc = db.query(Calculation).filter(
+        Calculation.id == calc_id, Calculation.project_id == project.id
+    ).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+
     book = db.query(ReferenceBook).filter(
         ReferenceBook.code == book_code,
         ReferenceBook.is_active == True,
@@ -181,13 +188,19 @@ def list_igi_book_rows(
         BookObjectType.book_version_id == book.id
     ).order_by(BookObjectType.table_num).all()
 
+    # Fetch all rows for this book in one query
+    all_rows = db.query(ReferenceRow).filter(
+        ReferenceRow.book_version_id == book.id,
+    ).order_by(ReferenceRow.table_num, ReferenceRow.row_num).all()
+
+    # Group by object_type_id using a plain dict
+    rows_by_ot: dict = {}
+    for row in all_rows:
+        rows_by_ot.setdefault(row.object_type_id, []).append(row)
+
     result = []
     for ot in otypes:
-        rows = db.query(ReferenceRow).filter(
-            ReferenceRow.book_version_id == book.id,
-            ReferenceRow.object_type_id == ot.id,
-        ).order_by(ReferenceRow.table_num, ReferenceRow.row_num).all()
-
+        rows = rows_by_ot.get(ot.id, [])
         result.append({
             "object_type_id": ot.id,
             "object_type_name": ot.name,
