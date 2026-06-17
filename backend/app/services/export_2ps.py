@@ -139,7 +139,27 @@ def generate_2ps_excel(project_name: str, stage: str, result: dict[str, Any]) ->
 
     # ── Positions ──────────────────────────────────────────────────────────
     positions = result.get("positions", [])
+
+    # Build section header index: position num → header text when section changes
+    section_changes: dict[int, str] = {}
+    prev_section = None
+    for pos in positions:
+        snum = pos.get("section_num", 0)
+        if snum != prev_section and snum > 0:
+            section_changes[pos["num"]] = f"Этап {snum}: {pos.get('section_name', '')}"
+        prev_section = snum
+
     for pi, pos in enumerate(positions):
+        # Insert section header row if section changes here
+        if pos["num"] in section_changes:
+            ws.merge_cells(f"A{r}:G{r}")
+            _set(ws, r, 1, section_changes[pos["num"]],
+                 font=Font(name="Times New Roman", size=10, bold=True),
+                 align=Alignment(horizontal="left", vertical="center"),
+                 fill=PatternFill(fgColor="D6E4F7", fill_type="solid"))
+            ws.row_dimensions[r].height = 16
+            r += 1
+
         is_last = (pi == len(positions) - 1)
         bot = _MED if is_last else _THIN
 
