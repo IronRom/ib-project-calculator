@@ -298,16 +298,6 @@ export default function EntitiesPage() {
               <Button variant="primary" disabled={computing || !calcId} onClick={handleCompute}>
                 {computing ? 'Расчёт…' : calcResult ? 'Пересчитать' : 'Рассчитать стоимость ПИР'}
               </Button>
-              {calcResult && calcId && (
-                <>
-                  <Button variant="secondary" onClick={() => downloadExport2PS(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
-                    ↓ 2ПС ИР
-                  </Button>
-                  <Button variant="secondary" onClick={() => downloadExportKP(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
-                    ↓ КП
-                  </Button>
-                </>
-              )}
               {dirty && !computing && (
                 <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Нажмите, чтобы применить изменения</span>
               )}
@@ -326,6 +316,16 @@ export default function EntitiesPage() {
               </div>
             )}
             <ResultTable result={calcResult} tdBase={tdBase} tdMono={tdMono} th={th} />
+            {calcId && (
+              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                <Button variant="secondary" onClick={() => downloadExport2PS(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
+                  ↓ Скачать 2ПС ИР
+                </Button>
+                <Button variant="secondary" onClick={() => downloadExportKP(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
+                  ↓ Скачать КП
+                </Button>
+              </div>
+            )}
           </>
         )}
       </div>
