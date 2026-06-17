@@ -68,6 +68,7 @@ class RowMatch:
     extrapolated: bool
     x_boundary: Optional[float] # boundary value used for extrapolation
     note: str                   # human-readable conversion / extrapolation note
+    used_minimum: bool = False  # True when x_value was None and minimum row was used
 
 
 def _try_convert(x_value: float, from_unit: str, to_unit: str) -> Optional[float]:
