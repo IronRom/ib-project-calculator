@@ -677,6 +677,17 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             "section_name":        entity.get("section_name", ""),
         })
 
+    # ── ИГИ geological surveys ────────────────────────────────────────────────
+    geological_surveys = entities_dict.get("geological_surveys", [])
+    if geological_surveys:
+        from app.services.igi_calculator import calculate_igi
+        igi_positions, igi_errors = calculate_igi(geological_surveys, db)
+        # Renumber to follow PIR positions
+        for p in igi_positions:
+            p["num"] = len(positions) + 1
+            positions.append(p)
+        errors.extend(igi_errors)
+
     # ── Aggregate ─────────────────────────────────────────────────────────────
     base_cost    = sum(p["cost_base"] for p in positions)
     current_cost = sum(p["cost"] for p in positions)
