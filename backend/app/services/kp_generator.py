@@ -15,7 +15,7 @@ from docx.shared import Cm, Pt, RGBColor
 
 _STATIC_DIR = Path(__file__).parent.parent.parent / "static"
 _SIGNATURE_IMG = _STATIC_DIR / "kp_signature.png"
-_LOGO_IMG = _STATIC_DIR / "kp_logo.jpg"
+_LOGO_IMG = _STATIC_DIR / "kp_logo.png"
 
 _LIBERATION_DIR = Path("/usr/share/fonts/truetype/liberation")
 _MAC_FONTS_DIR  = Path("/System/Library/Fonts/Supplemental")
