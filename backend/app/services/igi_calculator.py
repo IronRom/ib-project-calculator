@@ -17,23 +17,23 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import PriceQuarterlyIndex, ReferenceRow
+from app.models import PriceQuarterlyIndex, ReferenceBook, ReferenceRow
 
 _CAT_ROW_RANGES = {1: (1, 7), 2: (8, 15), 3: (16, 24)}
 _RE_ROW_NUM = re.compile(r'п\.(\d+)')
 
 
-def _get_survey_index(db: Session) -> tuple[float, str, str]:
-    """Return (index_value, period_label, source_ref) for survey work, base_year=2024.
+def _get_survey_index(db: Session, base_year: int = 2024) -> tuple[float, str, str]:
+    """Return (index_value, period_label, source_ref) for survey work.
 
-    Survey index is global (not per-book).
-    Looks up PriceQuarterlyIndex with work_type='survey', base_year=2024.
+    Survey index is looked up by base_year from the book's price_base_year.
+    Looks up PriceQuarterlyIndex with work_type='survey' and the given base_year.
     Falls back to 1.0 if not configured.
     """
     rec = (
         db.query(PriceQuarterlyIndex)
         .filter(
-            PriceQuarterlyIndex.base_year == 2024,
+            PriceQuarterlyIndex.base_year == base_year,
             PriceQuarterlyIndex.work_type == "survey",
         )
         .order_by(PriceQuarterlyIndex.year.desc(), PriceQuarterlyIndex.quarter.desc())
@@ -43,7 +43,7 @@ def _get_survey_index(db: Session) -> tuple[float, str, str]:
         roman = {1: "I", 2: "II", 3: "III", 4: "IV"}
         period = f"{roman.get(rec.quarter, str(rec.quarter))} квартал {rec.year} г."
         return float(rec.index_value), period, rec.source_ref
-    return 1.0, "—", "Индекс изысканий к 2024 не задан"
+    return 1.0, "—", f"Индекс изысканий к {base_year} не задан"
 
 
 def _lookup_report_cost(
@@ -118,7 +118,15 @@ def calculate_igi(
         k2 = float(survey.get("k2", 1.0))
         complexity_cat = int(survey.get("complexity_category", 2))
 
-        index_val, idx_period, idx_just = _get_survey_index(db)
+        # Resolve price_base_year from the book record (fallback to 2024)
+        book_rec = db.query(ReferenceBook).filter(ReferenceBook.id == book_version_id).first()
+        price_base_year = (
+            book_rec.price_base_year
+            if book_rec and hasattr(book_rec, "price_base_year")
+            else 2024
+        )
+
+        index_val, idx_period, idx_just = _get_survey_index(db, price_base_year)
 
         kameral_total_base = 0.0  # running total for report lookup (at base level)
 
@@ -176,7 +184,7 @@ def calculate_igi(
                 "cost": round(cost, 2),
                 "cost_base": round(b * volume, 2),
                 "book_code": book_code,
-                "price_base_year": 2024,
+                "price_base_year": price_base_year,
                 "price_index": index_val,
                 "price_index_period": idx_period,
                 "price_index_justification": idx_just,
@@ -186,6 +194,7 @@ def calculate_igi(
                 "section_num": 0,
                 "section_name": "ИГИ",
                 "work_category": work_cat,
+                "_stage_embedded": True,  # ИГИ costs are not split by П/Р stage
             })
 
         # Auto-append technical report if there are kameral items
@@ -208,7 +217,7 @@ def calculate_igi(
                     "cost": round(report_cost, 2),
                     "cost_base": round(report_cost_base, 2),
                     "book_code": book_code,
-                    "price_base_year": 2024,
+                    "price_base_year": price_base_year,
                     "price_index": index_val,
                     "price_index_period": idx_period,
                     "price_index_justification": idx_just,
@@ -218,6 +227,7 @@ def calculate_igi(
                     "section_num": 0,
                     "section_name": "ИГИ",
                     "work_category": "report",
+                    "_stage_embedded": True,  # ИГИ costs are not split by П/Р stage
                 })
 
     return positions, errors

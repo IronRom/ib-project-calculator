@@ -3,6 +3,7 @@ import urllib.parse
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -10,9 +11,13 @@ from app.api.deps import get_current_user, require_calculate
 from app.api.utils import sse as _sse
 from app.database import get_db
 from app.models import Calculation, Project, User
-from app.schemas import CalculationOut
+from app.schemas import CalculationOut, GeologicalSurvey as GeologicalSurveySchema
 from app.services.document_parser import parse_project_files
 from app.services.entity_extractor import extract_entities
+
+
+class PatchGeologicalSurveysRequest(BaseModel):
+    geological_surveys: list[GeologicalSurveySchema] = []
 
 router = APIRouter(prefix="/projects/{project_id}/calculations", tags=["calculations"])
 
@@ -84,8 +89,19 @@ async def stream_extraction(
                     result = await extract_entities(combined_text, db=new_db)
 
             with SessionLocal() as new_db:
+                # Preserve existing geological_surveys — they are managed separately
+                # and ExtractionResult has no geological_surveys field.
+                existing_calc = new_db.query(Calculation).filter(
+                    Calculation.id == calc_db_id
+                ).first()
+                existing_surveys = (
+                    (existing_calc.extracted_entities or {}).get("geological_surveys", [])
+                    if existing_calc else []
+                )
+                new_ee = result.model_dump()
+                new_ee.setdefault("geological_surveys", existing_surveys)
                 new_db.query(Calculation).filter(Calculation.id == calc_db_id).update(
-                    {"extracted_entities": result.model_dump()}
+                    {"extracted_entities": new_ee}
                 )
                 new_db.query(Project).filter(Project.id == project_db_id).update({"status": "extracted"})
                 new_db.commit()
@@ -227,7 +243,7 @@ def list_igi_book_rows(
 def patch_geological_surveys(
     project_id: int,
     calc_id: int,
-    body: dict,
+    body: PatchGeologicalSurveysRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -246,7 +262,7 @@ def patch_geological_surveys(
     if not calc:
         raise HTTPException(status_code=404, detail="Расчёт не найден")
 
-    surveys = body.get("geological_surveys", [])
+    surveys = [s.model_dump() for s in body.geological_surveys]
 
     # Ensure extracted_entities exists
     if not calc.extracted_entities:
