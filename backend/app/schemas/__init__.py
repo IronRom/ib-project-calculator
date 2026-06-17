@@ -86,6 +86,8 @@ class ExtractedEntity(BaseModel):
     tz_quote: Optional[str] = ""         # verbatim excerpt from TZ that justifies this entity
     x_value_missing_reason: Optional[str] = None  # set when x_value=None after all passes
     deleted: bool = False                          # soft-delete by user on validation screen
+    section_num: int = 0            # 0 = no explicit stage in TZ
+    section_name: str = ""          # short stage name ≤60 chars, empty when section_num=0
 
 
 class ExtractionResult(BaseModel):
