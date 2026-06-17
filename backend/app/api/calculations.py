@@ -155,6 +155,100 @@ def patch_entity_x_value(
     return entity
 
 
+@router.get("/{calc_id}/igi/book-rows")
+def list_igi_book_rows(
+    project_id: int,
+    calc_id: int,
+    book_code: str = "НЗ-2025-МС281-ИГИ",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return all object types + rows for the given НЗ ИГИ book.
+
+    Used by the frontend to build work item pickers.
+    Response: list of { object_type_id, object_type_name, table_num, rows: [...] }
+    """
+    from app.models import BookObjectType, ReferenceBook, ReferenceRow
+
+    book = db.query(ReferenceBook).filter(
+        ReferenceBook.code == book_code,
+        ReferenceBook.is_active == True,
+    ).first()
+    if not book:
+        raise HTTPException(status_code=404, detail=f"Справочник {book_code} не найден")
+
+    otypes = db.query(BookObjectType).filter(
+        BookObjectType.book_version_id == book.id
+    ).order_by(BookObjectType.table_num).all()
+
+    result = []
+    for ot in otypes:
+        rows = db.query(ReferenceRow).filter(
+            ReferenceRow.book_version_id == book.id,
+            ReferenceRow.object_type_id == ot.id,
+        ).order_by(ReferenceRow.table_num, ReferenceRow.row_num).all()
+
+        result.append({
+            "object_type_id": ot.id,
+            "object_type_name": ot.name,
+            "table_num": ot.table_num,
+            "rows": [
+                {
+                    "id": r.id,
+                    "row_num": r.row_num,
+                    "description": r.description,
+                    "x_unit": r.x_unit,
+                    "x_min": float(r.x_min) if r.x_min is not None else None,
+                    "x_max": float(r.x_max) if r.x_max is not None else None,
+                    "b": float(r.b) if r.b is not None else 0.0,
+                }
+                for r in rows
+            ],
+        })
+
+    return {"book_id": book.id, "book_code": book.code, "object_types": result}
+
+
+@router.patch("/{calc_id}/geological-surveys")
+def patch_geological_surveys(
+    project_id: int,
+    calc_id: int,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Replace geological_surveys in extracted_entities and re-run compute.
+
+    Body: { "geological_surveys": [ <GeologicalSurvey>, ... ] }
+    Returns updated calculation result.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.services.calculator import calculate
+
+    project = _get_own_project(project_id, current_user.id, db)
+    calc = db.query(Calculation).filter(
+        Calculation.id == calc_id, Calculation.project_id == project.id
+    ).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+
+    surveys = body.get("geological_surveys", [])
+
+    # Ensure extracted_entities exists
+    if not calc.extracted_entities:
+        calc.extracted_entities = {"entities": [], "stage": "П+Р", "geological_surveys": []}
+
+    calc.extracted_entities["geological_surveys"] = surveys
+    flag_modified(calc, "extracted_entities")
+
+    # Recompute
+    result = calculate(calc.extracted_entities, db)
+    calc.price_index_id = result.pop("_price_index_id", None)
+    calc.calculation_result = result
+    db.commit()
+    return result
+
+
 @router.get("/{calc_id}/unit-check")
 def unit_check(
     project_id: int,
