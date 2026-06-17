@@ -16,3 +16,4 @@ pydantic[email]==2.10.6
 pydantic-settings==2.7.1
 httpx==0.28.1
 sse-starlette==2.2.1
+reportlab==4.4.1

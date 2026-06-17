@@ -321,6 +321,10 @@ export function downloadExportKP(projectId: number, calcId: number): Promise<voi
   return _downloadFile(`/projects/${projectId}/calculations/${calcId}/export-kp`, `КП_${calcId}.docx`)
 }
 
+export function downloadExportKPPdf(projectId: number, calcId: number): Promise<void> {
+  return _downloadFile(`/projects/${projectId}/calculations/${calcId}/export-kp-pdf`, `КП_${calcId}.pdf`)
+}
+
 export function patchEntity(projectId: number, calcId: number, entityIdx: number, patch: Partial<{ x_value: number | null; x_unit: string; deleted: boolean }>) {
   return request<ExtractedEntity>(`/projects/${projectId}/calculations/${calcId}/entities/${entityIdx}`, {
     method: 'PATCH',

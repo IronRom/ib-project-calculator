@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
-import { computeCalculation, downloadExport2PS, getCalculation, CalculationResult, CalcPosition } from '@/lib/api'
+import { computeCalculation, downloadExport2PS, downloadExportKP, downloadExportKPPdf, getCalculation, CalculationResult, CalcPosition } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
 
@@ -41,6 +41,8 @@ export default function ResultsPage() {
   const [result, setResult] = useState<CalculationResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [exportingKP, setExportingKP] = useState(false)
+  const [exportingKPPdf, setExportingKPPdf] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -74,6 +76,28 @@ export default function ResultsPage() {
       setError(e instanceof Error ? e.message : 'Ошибка экспорта')
     } finally {
       setExporting(false)
+    }
+  }
+
+  async function handleExportKP() {
+    setExportingKP(true); setError('')
+    try {
+      await downloadExportKP(projectId, calcId)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Ошибка экспорта КП')
+    } finally {
+      setExportingKP(false)
+    }
+  }
+
+  async function handleExportKPPdf() {
+    setExportingKPPdf(true); setError('')
+    try {
+      await downloadExportKPPdf(projectId, calcId)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Ошибка экспорта КП PDF')
+    } finally {
+      setExportingKPPdf(false)
     }
   }
 
@@ -206,6 +230,17 @@ export default function ResultsPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {result && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="secondary" disabled={exportingKP} onClick={handleExportKP}>
+              {exportingKP ? 'Экспорт…' : '↓ Скачать КП (Word)'}
+            </Button>
+            <Button variant="secondary" disabled={exportingKPPdf} onClick={handleExportKPPdf}>
+              {exportingKPPdf ? 'Экспорт…' : '↓ Скачать КП (PDF)'}
+            </Button>
           </div>
         )}
 

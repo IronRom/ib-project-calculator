@@ -362,17 +362,55 @@ def export_kp(
     if not calc.calculation_result:
         raise HTTPException(status_code=422, detail="Сначала выполните расчёт")
 
-    stage = (calc.extracted_entities or {}).get("stage", "П+Р")
+    entities = calc.extracted_entities or {}
+    stage = entities.get("stage", "П+Р")
+    tz_object_name = entities.get("tz_object_name", "")
     docx_bytes = generate_kp_word(
         project_name=project.name,
         stage=stage,
         result=calc.calculation_result,
+        tz_object_name=tz_object_name,
     )
 
     safe_name = urllib.parse.quote(f"КП_{project.name}.docx")
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}"},
+    )
+
+
+@router.get("/{calc_id}/export-kp-pdf")
+def export_kp_pdf(
+    project_id: int,
+    calc_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.services.kp_generator import generate_kp_pdf
+    project = _get_own_project(project_id, current_user.id, db)
+    calc = db.query(Calculation).filter(
+        Calculation.id == calc_id, Calculation.project_id == project.id
+    ).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+    if not calc.calculation_result:
+        raise HTTPException(status_code=422, detail="Сначала выполните расчёт")
+
+    entities = calc.extracted_entities or {}
+    stage = entities.get("stage", "П+Р")
+    tz_object_name = entities.get("tz_object_name", "")
+    pdf_bytes = generate_kp_pdf(
+        project_name=project.name,
+        stage=stage,
+        result=calc.calculation_result,
+        tz_object_name=tz_object_name,
+    )
+
+    safe_name = urllib.parse.quote(f"КП_{project.name}.pdf")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}"},
     )
 
