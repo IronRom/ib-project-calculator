@@ -90,6 +90,8 @@ class ExtractedEntity(BaseModel):
     deleted: bool = False                          # soft-delete by user on validation screen
     section_num: int = 0            # 0 = no explicit stage in TZ
     section_name: str = ""          # short stage name ≤60 chars, empty when section_num=0
+    asutp_factors: Optional[dict[str, str]] = None  # Ф2→п.1.1, Ф5→п.2.2 etc. (СБЦП-22 only)
+    asutp_k: float = 1.0                           # correction coefficient from СБЦП-22 table 3
 
     @field_validator('x_unit', 'sbts_code', 'section_name', mode='before')
     @classmethod
