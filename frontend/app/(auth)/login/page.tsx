@@ -71,6 +71,8 @@ export default function LoginPage() {
           <Input
             label="Корпоративная почта"
             type="text"
+            name="username"
+            autoComplete="username"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required

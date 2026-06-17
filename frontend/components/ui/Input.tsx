@@ -12,9 +12,11 @@ interface InputProps {
   step?: string | number
   min?: string | number
   max?: string | number
+  name?: string
+  autoComplete?: string
 }
 
-export function Input({ label, type = 'text', value, onChange, placeholder, required, error, style, step, min, max }: InputProps) {
+export function Input({ label, type = 'text', value, onChange, placeholder, required, error, style, step, min, max, name, autoComplete }: InputProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, ...style }}>
       {label && (
@@ -32,6 +34,8 @@ export function Input({ label, type = 'text', value, onChange, placeholder, requ
         step={step}
         min={min}
         max={max}
+        name={name}
+        autoComplete={autoComplete}
         style={{
           width: '100%',
           background: 'var(--bg-input)',
