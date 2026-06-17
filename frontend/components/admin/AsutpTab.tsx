@@ -112,7 +112,7 @@ export function AsutpTab({ bookId }: Props) {
               </tr>
             </thead>
             <tbody>
-              {[...grouped.entries()].map(([fcode, opts]) => (
+              {Array.from(grouped.entries()).map(([fcode, opts]) => (
                 <React.Fragment key={fcode}>
                   <tr>
                     <td colSpan={3 + SCORE_LABELS.length + 1}

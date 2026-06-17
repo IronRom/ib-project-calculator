@@ -54,7 +54,7 @@ function groupBySections(entities: ExtractedEntity[]) {
     sections.get(num)!.indices.push(i)
   })
   // Staged groups (1,2,3...) first, ungrouped (0) last
-  return [...sections.entries()].sort(([a], [b]) => {
+  return Array.from(sections.entries()).sort(([a], [b]) => {
     if (a === 0) return 1
     if (b === 0) return -1
     return a - b
