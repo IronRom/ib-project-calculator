@@ -62,7 +62,7 @@ export default function RegisterPage() {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Input label="Организация" value={company} onChange={(e) => setCompany(e.target.value)} />
-          <Input label="Корпоративная почта" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <Input label="Корпоративная почта" type="text" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <Input label="Пароль" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
 
           {error && (
