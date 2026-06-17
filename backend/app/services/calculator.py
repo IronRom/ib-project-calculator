@@ -81,7 +81,7 @@ def _match_row(
     db: Session,
     book_version_id: int,
     table_num: int,
-    x_value: float,
+    x_value: Optional[float],
     x_unit: str,
     object_type_id: Optional[int] = None,
 ) -> Optional[RowMatch]:
@@ -104,6 +104,14 @@ def _match_row(
         )
     if not all_rows:
         return None
+
+    # ── X-fallback: use minimum row when X is unknown ─────────────────────
+    if x_value is None:
+        candidates_with_min = [r for r in all_rows if r.x_min is not None]
+        min_row = min(candidates_with_min, key=lambda r: float(r.x_min)) \
+                  if candidates_with_min else all_rows[0]
+        x_eff = float(min_row.x_min) if min_row.x_min is not None else 0.0
+        return RowMatch(min_row, x_eff, False, None, "", used_minimum=True)
 
     x_unit_norm = _normalize_unit(x_unit)
 
@@ -464,6 +472,9 @@ def _calculate_asutp_position(
         "price_index_justification": idx_just,
         "table_num":                 None,
         "row_num":                   None,
+        "used_minimum":              False,
+        "section_num":               entity.get("section_num", 0),
+        "section_name":              entity.get("section_name", ""),
         "_stage_embedded":           True,   # stage% already applied per-module
         "_asutp_modules":            module_results,
     }
@@ -482,7 +493,8 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         sbts_code      = entity.get("sbts_code", "")
         table_num      = entity.get("sbts_table")
         object_type_id = entity.get("sbts_object_type_id")
-        x_value        = float(entity.get("x_value") or 0.0)
+        _x_raw         = entity.get("x_value")
+        x_value        = float(_x_raw) if _x_raw is not None else None
         x_unit         = entity.get("x_unit", "")
         object_name    = entity.get("object_name", "")
         qty            = max(1, int(entity.get("quantity") or 1))
@@ -567,6 +579,12 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         for _name, _val, _short in applied_coeffs:
             para = f"п. 2.{table_num}" if table_num else "п. 1"
             justification += f"; {para} ({_short} К={_fmt_ru(_val)})"
+        if match.used_minimum:
+            missing_hint = entity.get("x_value_missing_reason") or ""
+            justification += f" [по мин. X={_fmt_ru(match.x_effective)}"
+            if missing_hint:
+                justification += f"; для точного расчёта: {missing_hint}"
+            justification += "]"
 
         # ── Formula (расчёт стоимости) ────────────────────────────────────────
         a_rub, b_rub = a * 1000, b * 1000
@@ -605,6 +623,9 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             "price_index_justification": idx_justification,
             "table_num":           table_num,
             "row_num":             row_num,
+            "used_minimum":        match.used_minimum,
+            "section_num":         entity.get("section_num", 0),
+            "section_name":        entity.get("section_name", ""),
         })
 
     # ── Aggregate ─────────────────────────────────────────────────────────────
