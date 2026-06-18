@@ -444,6 +444,8 @@ export interface ExtractedEntity {
   deleted?: boolean
   section_num?: number
   section_name?: string
+  pd_sections_pct?: number  // fraction 0-1, applied to ПД cost; default 1.0
+  rd_sections_pct?: number  // fraction 0-1, applied to РД cost; default 1.0
 }
 
 export interface ExtractionResult {
@@ -478,12 +480,15 @@ export interface CalcPosition {
   justification: string
   formula: string
   cost: number
+  cost_base?: number
   book_code: string
   table_num: number
   row_num: string
   used_minimum?: boolean
   section_num?: number
   section_name?: string
+  stage_label?: string   // "ПД" | "РД" | ""
+  stage_pct?: number     // 0.4 | 0.6 | 1.0
 }
 
 export interface CalculationResult {

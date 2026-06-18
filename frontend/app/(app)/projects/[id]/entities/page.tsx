@@ -624,7 +624,18 @@ function ResultTable({ result, tdBase, tdMono, th }: { result: CalculationResult
             {result.positions.map((pos: CalcPosition, i: number) => (
               <tr key={i} style={{ borderTop: 'var(--hairline)' }}>
                 <td style={{ ...tdMono, color: 'var(--fg-3)', textAlign: 'center' }}>{pos.num}</td>
-                <td style={{ ...tdBase, fontSize: 13 }}>{pos.name}</td>
+                <td style={{ ...tdBase, fontSize: 13 }}>
+                  {pos.stage_label && (
+                    <span style={{
+                      display: 'inline-block', marginRight: 5,
+                      padding: '1px 5px', borderRadius: 3, fontSize: 10, fontWeight: 700,
+                      background: pos.stage_label === 'ПД' ? '#dbeafe' : '#f3f4f6',
+                      color: pos.stage_label === 'ПД' ? '#1d4ed8' : '#6b7280',
+                      border: '1px solid #e5e7eb',
+                    }}>{pos.stage_label}</span>
+                  )}
+                  {pos.name}
+                </td>
                 <td style={{ ...tdBase, fontSize: 12, color: 'var(--fg-2)' }}>{pos.row_description}</td>
                 <td style={{ ...tdMono, textAlign: 'center', color: 'var(--fg-2)' }}>{pos.unit}</td>
                 <td style={{ ...tdMono, textAlign: 'right' }}>{pos.quantity}</td>

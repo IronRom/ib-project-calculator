@@ -174,7 +174,18 @@ export default function ResultsPage() {
                   {result.positions.map((pos: CalcPosition, i: number) => (
                     <tr key={i} style={{ borderTop: 'var(--hairline)' }}>
                       <td style={{ ...tdMono, color: 'var(--fg-3)', textAlign: 'center' }}>{pos.num}</td>
-                      <td style={td}>{pos.name}</td>
+                      <td style={td}>
+                        {pos.stage_label && (
+                          <span style={{
+                            display: 'inline-block', marginRight: 6,
+                            padding: '1px 6px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+                            background: pos.stage_label === 'ПД' ? 'var(--accent-subtle)' : 'var(--bg-raised)',
+                            color: pos.stage_label === 'ПД' ? 'var(--accent)' : 'var(--fg-2)',
+                            border: '1px solid var(--border-default)',
+                          }}>{pos.stage_label}</span>
+                        )}
+                        {pos.name}
+                      </td>
                       <td style={{ ...tdMono, color: 'var(--fg-2)' }}>{pos.unit}</td>
                       <td style={{ ...tdMono, textAlign: 'right' }}>{pos.quantity}</td>
                       <td style={{ ...td, fontSize: 12, color: 'var(--fg-3)', maxWidth: 280 }}>{pos.justification}</td>
@@ -204,20 +215,7 @@ export default function ResultsPage() {
                     bold
                     note="МУ №620 п.2.2.3"
                   />
-                  {result.stage_factor !== 1 && (
-                    <>
-                      <SummaryRow
-                        label={`Доля стоимости проектных работ (стадия ${result.stage})`}
-                        value={String(result.stage_factor)}
-                        note="СБЦП 81-2001-17 п.1.7"
-                      />
-                      <SummaryRow
-                        label={`Итого с долей стоимости проектирования К=${result.stage_factor}`}
-                        value={fmt(result.cost_with_stage)}
-                        bold
-                      />
-                    </>
-                  )}
+                  {/* stage % now embedded per-position; no aggregate factor row needed */}
                   <SummaryRow
                     label={`НДС ${result.vat_rate}%`}
                     value={fmt(result.vat_amount)}

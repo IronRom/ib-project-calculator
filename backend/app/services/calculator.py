@@ -11,6 +11,12 @@ from app.models import AsutpFactorOption, AsutpModule, PriceIndex, ReferenceBook
 
 ROMAN = {1: "I", 2: "II", 3: "III", 4: "IV"}
 STAGE_FACTORS = {"П": 0.4, "Р": 0.6, "П+Р": 1.0}
+# When stage="П+Р", emit two positions per entity: ПД then РД
+STAGE_SPLIT = {
+    "П+Р": [("ПД", 0.4), ("РД", 0.6)],
+    "П":   [("ПД", 0.4)],
+    "Р":   [("РД", 0.6)],
+}
 
 
 def _normalize_unit(u: str) -> str:
@@ -654,28 +660,48 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         if qty > 1:
             formula += f"*{qty}"
 
-        positions.append({
-            "num":                 len(positions) + 1,
-            "name":                object_name,
-            "row_description":     row.description or "",
-            "unit":                row_unit,
-            "quantity":            match.x_effective,
-            "item_count":          qty,
-            "justification":       justification,
-            "formula":             formula,
-            "cost":                round(cost, 2),
-            "cost_base":           round(cost_base, 2),
-            "book_code":           book.code,
-            "price_base_year":     base_year,
-            "price_index":         idx_value,
-            "price_index_period":  idx_period,
-            "price_index_justification": idx_justification,
-            "table_num":           table_num,
-            "row_num":             row_num,
-            "used_minimum":        match.used_minimum,
-            "section_num":         entity.get("section_num", 0),
-            "section_name":        entity.get("section_name", ""),
-        })
+        stage_splits = STAGE_SPLIT.get(stage, [("", 1.0)])
+        for stage_label, stage_pct in stage_splits:
+            sect_pct = 1.0
+            if stage_label == "ПД":
+                sect_pct = float(entity.get("pd_sections_pct") or 1.0)
+            elif stage_label == "РД":
+                sect_pct = float(entity.get("rd_sections_pct") or 1.0)
+
+            combined_pct = stage_pct * sect_pct
+            pos_cost_base = round(cost_base * combined_pct, 2)
+            pos_cost = round(cost * combined_pct, 2)
+
+            stage_formula = formula
+            if stage_pct != 1.0:
+                stage_formula += f"*{_fmt_ru(stage_pct)}"
+            if sect_pct != 1.0:
+                stage_formula += f"*{_fmt_ru(sect_pct)}"
+
+            positions.append({
+                "num":                 len(positions) + 1,
+                "name":                object_name,
+                "row_description":     row.description or "",
+                "unit":                row_unit,
+                "quantity":            match.x_effective,
+                "item_count":          qty,
+                "justification":       justification,
+                "formula":             stage_formula,
+                "cost":                pos_cost,
+                "cost_base":           pos_cost_base,
+                "book_code":           book.code,
+                "price_base_year":     base_year,
+                "price_index":         idx_value,
+                "price_index_period":  idx_period,
+                "price_index_justification": idx_justification,
+                "table_num":           table_num,
+                "row_num":             row_num,
+                "used_minimum":        match.used_minimum,
+                "section_num":         entity.get("section_num", 0),
+                "section_name":        stage_label or entity.get("section_name", ""),
+                "stage_label":         stage_label,
+                "stage_pct":           combined_pct,
+            })
 
     # ── ИГИ geological surveys ────────────────────────────────────────────────
     geological_surveys = entities_dict.get("geological_surveys", [])
@@ -692,9 +718,9 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     base_cost    = sum(p["cost_base"] for p in positions)
     current_cost = sum(p["cost"] for p in positions)
 
-    # ASUTP positions have stage% already embedded — don't double-apply stage_factor
-    _standard_cost = sum(p["cost"] for p in positions if not p.get("_stage_embedded"))
-    _asutp_cost    = sum(p["cost"] for p in positions if p.get("_stage_embedded"))
+    # Stage % is now embedded per-position (П+Р → two rows); no double-apply needed
+    _standard_cost = current_cost
+    _asutp_cost    = 0.0
 
     # Build index summary keyed by base_year (for 2ПС and frontend display)
     index_summary: dict[int, dict] = {}
@@ -729,7 +755,8 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     )
     vat_rate = float(vat_rec.index_value) if vat_rec else 22.0
 
-    cost_with_stage = round(_standard_cost * stage_factor + _asutp_cost, 2)
+    # stage_factor kept for backwards-compat but always 1.0 (embedded in positions)
+    cost_with_stage = round(current_cost, 2)
     vat_amount      = round(cost_with_stage * vat_rate / 100, 2)
     total_with_vat  = round(cost_with_stage + vat_amount, 2)
 
@@ -741,7 +768,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         "price_index_justification": price_index_just,
         "index_summary":             list(index_summary.values()),
         "stage":                     stage,
-        "stage_factor":              stage_factor,
+        "stage_factor":              1.0,
         "current_cost":              round(current_cost, 2),
         "cost_with_stage":           cost_with_stage,
         "vat_rate":                  vat_rate,
