@@ -214,6 +214,26 @@ def list_igi_book_rows(
     for row in all_rows:
         rows_by_ot.setdefault(row.object_type_id, []).append(row)
 
+    # Work category per table (НЗ 281/пр structure, until DB column is added)
+    _WC: dict[int, str] = {
+        12: "field", 14: "field", 16: "field", 18: "field",
+        20: "field", 22: "field", 24: "field",
+        28: "field", 29: "field", 30: "field", 31: "field", 32: "field",
+        33: "kameral",
+        34: "field", 35: "field", 36: "kameral",
+        37: "field", 38: "kameral", 39: "field", 40: "kameral",
+        41: "field", 42: "kameral",
+        43: "field", 44: "field", 45: "kameral",
+        47: "field", 48: "kameral",
+        50: "field", 51: "kameral",
+        52: "field", 53: "kameral",
+        54: "field", 55: "kameral",
+        56: "lab", 57: "lab", 58: "lab", 59: "lab", 60: "lab", 61: "lab",
+        62: "kameral",
+        63: "lab", 64: "kameral",
+        66: "program",
+    }
+
     result = []
     for ot in otypes:
         rows = rows_by_ot.get(ot.id, [])
@@ -221,7 +241,7 @@ def list_igi_book_rows(
             "object_type_id": ot.id,
             "object_type_name": ot.name,
             "table_num": ot.table_num,
-            "work_category": getattr(ot, "work_category", "field"),
+            "work_category": _WC.get(ot.table_num, getattr(ot, "work_category", "field")),
             "rows": [
                 {
                     "id": r.id,

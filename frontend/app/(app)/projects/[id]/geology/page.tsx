@@ -32,7 +32,8 @@ export default function GeologyPage() {
     book_code: '',
     complexity_category: 2,
     k1: 0.70,
-    winter_pct: 0.29,
+    winter_pct: 0.29,       // ПДЗнп из Табл.3 НЗ
+    unfavorable_months: 6.3, // Тверская = 6.3 мес (Прил.1 НЗ)
     k2: 1.0,
     items: [],
   })
@@ -134,7 +135,16 @@ export default function GeologyPage() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-neutral-400">Зимний % (доля, 0.29=29%)</span>
+            <span className="text-neutral-400">Неблаг. период (мес, Прил.1 НЗ)</span>
+            <input
+              type="number" step="0.1" min="0" max="12"
+              className="bg-neutral-800 rounded px-3 py-1.5 text-white w-24"
+              value={survey.unfavorable_months}
+              onChange={e => setSurvey(p => ({ ...p, unfavorable_months: Number(e.target.value) }))}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-neutral-400">ПДЗнп % (Табл.3 НЗ, напр. 0.29)</span>
             <input
               type="number" step="0.01" min="0" max="1"
               className="bg-neutral-800 rounded px-3 py-1.5 text-white w-24"
@@ -142,6 +152,14 @@ export default function GeologyPage() {
               onChange={e => setSurvey(p => ({ ...p, winter_pct: Number(e.target.value) }))}
             />
           </label>
+          <div className="flex flex-col gap-1 text-sm">
+            <span className="text-neutral-400">Зимний надбавка</span>
+            <span className="bg-neutral-800 rounded px-3 py-1.5 text-emerald-400 w-24 font-mono">
+              {survey.unfavorable_months > 0
+                ? `${(survey.unfavorable_months / 12 * survey.winter_pct * 100).toFixed(1)}%`
+                : `${(survey.winter_pct * 100).toFixed(1)}%`}
+            </span>
+          </div>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-neutral-400">К2 (климат)</span>
             <input

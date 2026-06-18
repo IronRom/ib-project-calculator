@@ -80,14 +80,12 @@ def _lookup_report_cost(
     X = kameral_total_rub converted to тыс.руб.
     Returns cost in rubles at base year level (before index).
 
-    Row structure in DB: x_min/x_max = тыс.руб thresholds, b = cost (руб).
-    Step-lookup: returns b of the first row where x_max >= X (тыс.руб threshold).
+    Linear interpolation per НЗ п.121 примечание 1.
+    Reference points stored as x_max (regular rows) or x_min (last "свыше" row).
     complexity_cat determines which row set (I → п.1-7, II → п.8-15, III → п.16-24).
     """
     kameral_thous = kameral_total_rub / 1000
 
-    # Determine row_num range by complexity category
-    # Cat I: п.1-п.7, Cat II: п.8-п.15, Cat III: п.16-п.24
     lo_p, hi_p = _CAT_ROW_RANGES.get(complexity_cat, (8, 15))
 
     rows: list[ReferenceRow] = (
@@ -98,7 +96,6 @@ def _lookup_report_cost(
         )
         .all()
     )
-    # Filter to complexity category rows by row_num parse
     cat_rows = []
     for r in rows:
         m = _RE_ROW_NUM.search(r.row_num or "")
@@ -108,16 +105,34 @@ def _lookup_report_cost(
     if not cat_rows:
         return 0.0
 
-    # Sort by x_max (thresholds are reference points)
-    cat_rows.sort(key=lambda r: float(r.x_max) if r.x_max is not None else 1e12)
-
-    # Find the right reference point: first row where x_max >= kameral_thous
+    # Build reference points: (X_тыс.руб, b_руб)
+    # x_max = reference point for normal rows; x_min = reference for last "свыше" row
+    ref_points: list[tuple[float, float]] = []
     for r in cat_rows:
-        if r.x_max is None or kameral_thous <= float(r.x_max):
-            return float(r.b)
+        if r.x_max is not None:
+            ref_points.append((float(r.x_max), float(r.b)))
+        elif r.x_min is not None:
+            ref_points.append((float(r.x_min), float(r.b)))
 
-    # Above all thresholds: use last row
-    return float(cat_rows[-1].b)
+    if not ref_points:
+        return 0.0
+
+    ref_points.sort(key=lambda p: p[0])
+
+    if kameral_thous <= ref_points[0][0]:
+        return ref_points[0][1]
+    if kameral_thous >= ref_points[-1][0]:
+        return ref_points[-1][1]
+
+    # Linear interpolation between adjacent reference points
+    for i in range(len(ref_points) - 1):
+        x0, b0 = ref_points[i]
+        x1, b1 = ref_points[i + 1]
+        if x0 <= kameral_thous <= x1:
+            t = (kameral_thous - x0) / (x1 - x0)
+            return b0 + t * (b1 - b0)
+
+    return ref_points[-1][1]
 
 
 def calculate_igi(
@@ -141,8 +156,17 @@ def calculate_igi(
         book_code = survey.get("book_code", f"book#{book_version_id}")
         k1 = float(survey.get("k1", 0.70))
         winter_pct = float(survey.get("winter_pct", 0.0))
+        unfavorable_months = float(survey.get("unfavorable_months", 0.0))
         k2 = float(survey.get("k2", 1.0))
         complexity_cat = int(survey.get("complexity_category", 2))
+
+        # НЗ п.21: ДЗнп = С_Пнп × ПДЗнп, С_Пнп = С_Пнз × (T_unfav/12)
+        # winter_pct = ПДЗнп (Table 3 value, e.g. 0.29)
+        # unfavorable_months = T_unfav from Приложение 1
+        if unfavorable_months > 0:
+            winter_factor = (unfavorable_months / 12.0) * winter_pct
+        else:
+            winter_factor = winter_pct  # legacy: treat as combined factor
 
         # Resolve price_base_year from the book record (fallback to 2024)
         book_rec = db.query(ReferenceBook).filter(ReferenceBook.id == book_version_id).first()
@@ -154,7 +178,9 @@ def calculate_igi(
 
         index_val, idx_period, idx_just = _get_survey_index(db, price_base_year)
 
-        kameral_total_base = 0.0  # running total for report lookup (at base level)
+        # Table 65 X = "общая стоимость камеральных работ из глав IV-VIII НЗ"
+        # = lab (Гл.VII-VIII) + kameral processing (Гл.IV-VIII), excluding program (Гл.X)
+        nonfield_total_base = 0.0  # accumulates lab + kameral at base level for Table 65
 
         items = [it for it in survey.get("items", []) if not it.get("deleted")]
 
@@ -177,18 +203,19 @@ def calculate_igi(
                 table_k1 = _get_k1_for_table(db, book_version_id, table_num)
                 effective_k1 = table_k1 if table_k1 is not None else k1
 
-                cost = base * effective_k1 * (1 + winter_pct) * k2 * index_val
+                cost = base * effective_k1 * (1 + winter_factor) * k2 * index_val
                 coeff_note = (
                     f"К1={effective_k1}"
-                    + (f"; зима {int(winter_pct*100)}%" if winter_pct else "")
+                    + (f"; зима {round(winter_factor * 100, 1)}%" if winter_factor else "")
                     + (f"; К2={k2}" if k2 != 1.0 else "")
                 )
             elif work_cat in ("lab", "kameral", "program"):
                 effective_k1 = k1  # not used, but keep variable consistent
                 cost = base * index_val
                 coeff_note = ""
-                if work_cat == "kameral":
-                    kameral_total_base += base  # accumulate pre-index
+                if work_cat in ("lab", "kameral"):
+                    # Accumulate for Table 65 (technical report X parameter)
+                    nonfield_total_base += base
             else:
                 errors.append(f"ИГИ: неизвестная work_category '{work_cat}'")
                 continue
@@ -197,15 +224,14 @@ def calculate_igi(
             if coeff_note:
                 just += f" [{coeff_note}]"
 
-            # Formula string: show (a+b×vol) when a≠0, else b×vol
             if a:
                 formula = f"({int(a)}+{int(b)}×{volume})"
             else:
                 formula = f"{int(b)}×{volume}"
             if work_cat == "field":
                 formula += f"×{effective_k1}"
-                if winter_pct:
-                    formula += f"×{1 + winter_pct:.2f}"
+                if winter_factor:
+                    formula += f"×{1 + winter_factor:.3f}"
                 if k2 != 1.0:
                     formula += f"×{k2}"
             if index_val != 1.0:
@@ -236,9 +262,10 @@ def calculate_igi(
                 "_stage_embedded": True,  # ИГИ costs are not split by П/Р stage
             })
 
-        # Auto-append technical report if there are kameral items
-        if kameral_total_base > 0:
-            report_cost_base = _lookup_report_cost(db, book_version_id, kameral_total_base, complexity_cat)
+        # Auto-append technical report if there are lab/kameral items
+        # НЗ п.121: X = общая стоимость камеральных работ из глав IV-VIII (lab + kameral, excl. program)
+        if nonfield_total_base > 0:
+            report_cost_base = _lookup_report_cost(db, book_version_id, nonfield_total_base, complexity_cat)
             report_cost = report_cost_base * index_val
             if report_cost > 0:
                 positions.append({
@@ -250,7 +277,7 @@ def calculate_igi(
                     "item_count": 1,
                     "justification": (
                         f"{book_code}, табл. 65, кат.слож.{complexity_cat}"
-                        f" (камеральные: {round(kameral_total_base/1000, 1)} тыс.руб)"
+                        f" (лаб+камерал: {round(nonfield_total_base/1000, 1)} тыс.руб)"
                     ),
                     "formula": f"{int(report_cost_base)}×{index_val}",
                     "cost": round(report_cost, 2),

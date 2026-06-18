@@ -524,7 +524,8 @@ export interface GeologicalSurvey {
   book_code: string
   complexity_category: number   // 1 | 2 | 3
   k1: number
-  winter_pct: number
+  winter_pct: number            // ПДЗнп from Table 3 НЗ (e.g. 0.29 for 6.0-6.9 months)
+  unfavorable_months: number    // duration from Приложение 1 НЗ (e.g. 6.3 for Тверская)
   k2: number
   items: IgiItem[]
 }

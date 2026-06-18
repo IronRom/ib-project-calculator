@@ -286,6 +286,9 @@ class GeologicalSurvey(BaseModel):
     book_code: str = ""                 # e.g. "НЗ-2025-МС281-ИГИ"
     complexity_category: int = 2        # 1 | 2 | 3 (ИГИ conditions category)
     k1: float = 0.70                    # home-base coefficient (Table 1 НЗ)
-    winter_pct: float = 0.0             # winter surcharge fraction, e.g. 0.29
+    winter_pct: float = 0.0             # ПДЗнп from Table 3 НЗ, e.g. 0.29 for 6.0-6.9 months
+    unfavorable_months: float = 0.0     # duration of unfavorable period (Прил.1 НЗ), months
+                                        # if > 0: winter surcharge = (months/12) × winter_pct
+                                        # if == 0: winter_pct used directly (legacy)
     k2: float = 1.0                     # climate zone coefficient (Table 2 НЗ)
     items: list[IgiItem] = []
