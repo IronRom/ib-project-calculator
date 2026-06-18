@@ -654,7 +654,7 @@ def _fill_sbts_table_from_type_id(result: ExtractionResult, db) -> None:
 
 def _fill_sbts_codes(result: ExtractionResult, db, detected_codes: list[str]) -> None:
     """Fill empty sbts_code by matching entity's sbts_table → book that owns it."""
-    if not db or not detected_codes:
+    if not db:
         return
     from app.models import ReferenceBook, ReferenceRow
 
@@ -775,13 +775,14 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
         if not detected_codes:
             book_list = _build_book_list(db)
             if book_list:
-                # ── Step 0a: extract object list from TZ (no book knowledge) ──
+                # ── Step 0a: extract object list + project context from TZ ──
                 step0a_msg = (
-                    "Прочитай техническое задание и составь краткий список объектов проектирования.\n"
-                    "Для каждого объекта укажи: название, тип (здание/сооружение/сеть/изыскания), "
-                    "основные параметры если указаны в ТЗ.\n"
-                    "Не упоминай справочники или нормативы — только объекты.\n"
-                    "Ответ: нумерованный список, один объект на строку.\n\n"
+                    "Прочитай техническое задание и выдай:\n"
+                    "СТРОКА 1: Тип проекта одной строкой — укажи: гражданский / промышленный / инфраструктурный, "
+                    "и если промышленный — отрасль (например: «промышленный, переработка лубяных культур / текстиль»).\n"
+                    "СТРОКИ 2+: Нумерованный список объектов проектирования. "
+                    "Для каждого: название, тип (здание/сооружение/сеть/изыскания), параметры из ТЗ.\n"
+                    "Не упоминай справочники или нормативы.\n\n"
                     "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
                 )
                 resp0a = client.messages.create(
@@ -984,13 +985,14 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
         if not detected_codes:
             book_list = _build_book_list(db)
             if book_list:
-                # ── Step 0a: extract object list from TZ ──────────────────────
+                # ── Step 0a: extract object list + project context from TZ ──
                 step0a_content = (
-                    "Прочитай техническое задание и составь краткий список объектов проектирования.\n"
-                    "Для каждого объекта укажи: название, тип (здание/сооружение/сеть/изыскания), "
-                    "основные параметры если указаны в ТЗ.\n"
-                    "Не упоминай справочники или нормативы — только объекты.\n"
-                    "Ответ: нумерованный список, один объект на строку.\n\n"
+                    "Прочитай техническое задание и выдай:\n"
+                    "СТРОКА 1: Тип проекта одной строкой — укажи: гражданский / промышленный / инфраструктурный, "
+                    "и если промышленный — отрасль (например: «промышленный, переработка лубяных культур / текстиль»).\n"
+                    "СТРОКИ 2+: Нумерованный список объектов проектирования. "
+                    "Для каждого: название, тип (здание/сооружение/сеть/изыскания), параметры из ТЗ.\n"
+                    "Не упоминай справочники или нормативы.\n\n"
                     "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
                 )
                 object_list = await _call_plain(

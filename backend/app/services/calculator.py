@@ -67,6 +67,37 @@ UNIT_CONVERSIONS: dict[tuple[str, str], Callable[[float], float]] = {
     ("м", "км"):                  lambda x: x / 1000,
 }
 
+# Long-form unit names (from reference_rows) → canonical abbreviations used in UNIT_CONVERSIONS
+_UNIT_ALIASES: dict[str, str] = {
+    "тысяч кубических метров / час":   "тыс. м³/ч",
+    "тысяч кубических метров / сутки": "тыс. м³/сут",
+    "тысяч кубических метров/час":     "тыс. м³/ч",
+    "тысяч кубических метров/сутки":   "тыс. м³/сут",
+    "кубических метров / час":         "м³/ч",
+    "кубических метров / сутки":       "м³/сут",
+    "кубических метров/час":           "м³/ч",
+    "кубических метров/сутки":         "м³/сут",
+    "кубический метр":                 "м³",
+    "тонн / сутки":                    "т/сут",
+    "тонн/сутки":                      "т/сут",
+    "тонн в сутки":                    "т/сут",
+    "метров":                          "м",
+    "километров":                      "км",
+    "погонных метров":                 "п.м",
+    "погонный метр":                   "п.м",
+    "тыс.м³/сут":                      "тыс. м³/сут",
+    "тыс.м³/ч":                        "тыс. м³/ч",
+    "м3/сут":                          "м³/сут",
+    "м3/ч":                            "м³/ч",
+    "тыс.м3/сут":                      "тыс. м³/сут",
+    "тыс.м3/ч":                        "тыс. м³/ч",
+}
+
+
+def _canonical_unit(u: str) -> str:
+    """Normalize unit to canonical abbreviation for conversion lookup."""
+    return _UNIT_ALIASES.get(u.strip(), u.strip())
+
 
 @dataclass
 class RowMatch:
@@ -94,12 +125,18 @@ def _try_convert(x_value: float, from_unit: str, to_unit: str) -> Optional[float
     Discrete (non-physical) units like шт./ячейка/шкаф/пункт are all
     equivalent — return x_value unchanged (1:1).
     """
-    fn = UNIT_CONVERSIONS.get((from_unit, to_unit))
+    from_c = _canonical_unit(from_unit)
+    to_c   = _canonical_unit(to_unit)
+    # Exact match after canonicalization
+    if from_c == to_c:
+        return x_value
+    fn = UNIT_CONVERSIONS.get((from_c, to_c))
     if fn is not None:
         return fn(x_value)
     # Both units are discrete → 1:1 equivalence
-    from_phys = from_unit.lower() in {u.lower() for u in _PHYSICAL_UNITS}
-    to_phys   = to_unit.lower()   in {u.lower() for u in _PHYSICAL_UNITS}
+    all_physical_lower = {u.lower() for u in _PHYSICAL_UNITS} | {u.lower() for u in _UNIT_ALIASES}
+    from_phys = from_c.lower() in all_physical_lower
+    to_phys   = to_c.lower()   in all_physical_lower
     if not from_phys and not to_phys:
         return x_value
     return None
