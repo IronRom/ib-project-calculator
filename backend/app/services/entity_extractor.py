@@ -789,7 +789,10 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
     result: Optional[ExtractionResult] = None
     for block in resp1.content:
         if block.type == "tool_use" and block.name == "extract_pir_entities":
-            result = ExtractionResult(**block.input)
+            try:
+                result = ExtractionResult(**block.input)
+            except Exception:
+                result = ExtractionResult(entities=[], missing_data=["AI вернул пустой результат извлечения"])
             break
 
     if not result:
