@@ -23,14 +23,39 @@ _STRIP_RANGE_SUFFIX = re.compile(
 # ── Context builders ──────────────────────────────────────────────────────────
 
 def _build_book_list(db) -> str:
-    """Step 0: one line per active book — code + official name."""
-    from app.models import ReferenceBook
+    """Step 0: books with representative object sample (one per table) for semantic matching."""
+    from app.models import ReferenceBook, BookObjectType
     books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
     if not books:
         return ""
-    lines = ["Активные справочники:"]
+    lines = ["Активные справочники (код, название, примеры объектов):"]
     for b in books:
-        lines.append(f"  {b.code} — {b.official_name or b.code}")
+        lines.append(f"\n  {b.code} — {b.official_name or b.code}")
+        # Uniform sample across the book: pick one type per table, evenly spaced
+        all_types = (
+            db.query(BookObjectType)
+            .filter(BookObjectType.book_version_id == b.id)
+            .order_by(BookObjectType.table_num)
+            .all()
+        )
+        # Deduplicate by table_num, keep first per table
+        seen_tables: set = set()
+        per_table: list = []
+        for t in all_types:
+            key = t.table_num if t.table_num is not None else id(t)
+            if key not in seen_tables:
+                seen_tables.add(key)
+                per_table.append(t)
+        # Pick 8 evenly spaced across all tables
+        n = len(per_table)
+        indices = [int(i * (n - 1) / 7) for i in range(8)] if n >= 8 else list(range(n))
+        sample: list[str] = []
+        for i in indices:
+            name = per_table[i].name
+            name = name if len(name) <= 80 else name[:77] + "…"
+            sample.append(name)
+        if sample:
+            lines.append(f"    Примеры объектов: {'; '.join(sample)}")
     return "\n".join(lines)
 
 
@@ -750,19 +775,43 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
         if not detected_codes:
             book_list = _build_book_list(db)
             if book_list:
-                step0_msg = (
-                    "Определи, какой справочник (один или несколько) применим к данному ТЗ.\n"
-                    "Ответь ТОЛЬКО кодами через запятую, без пояснений. Пример: СБЦП 81-2001-17\n\n"
-                    f"{book_list}\n\n"
+                # ── Step 0a: extract object list from TZ (no book knowledge) ──
+                step0a_msg = (
+                    "Прочитай техническое задание и составь краткий список объектов проектирования.\n"
+                    "Для каждого объекта укажи: название, тип (здание/сооружение/сеть/изыскания), "
+                    "основные параметры если указаны в ТЗ.\n"
+                    "Не упоминай справочники или нормативы — только объекты.\n"
+                    "Ответ: нумерованный список, один объект на строку.\n\n"
                     "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
                 )
-                resp0 = client.messages.create(
+                resp0a = client.messages.create(
                     model=settings.extraction_model,
-                    max_tokens=100,
+                    max_tokens=400,
                     system=system_block,
-                    messages=[{"role": "user", "content": step0_msg}],
+                    messages=[{"role": "user", "content": step0a_msg}],
                 )
-                raw = resp0.content[0].text.strip() if resp0.content else ""
+                object_list = resp0a.content[0].text.strip() if resp0a.content else ""
+
+                # ── Step 0b: match object list to books ────────────────────────
+                step0b_msg = (
+                    "На основе списка объектов проектирования выбери применимые справочники.\n"
+                    "Правила:\n"
+                    "1. Для каждого объекта найди справочник, чьи «Примеры объектов» "
+                    "совпадают по типу, назначению или отрасли — даже если терминология отличается.\n"
+                    "2. Промышленные объекты (завод, цех, производство) → "
+                    "отраслевой справочник, не общегражданский.\n"
+                    "3. Изыскания → справочник изысканий (НЗ).\n"
+                    "Ответь ТОЛЬКО кодами через запятую. Пример: СБЦП 81-2001-17, НЗ-2025-МС281-ИГИ\n\n"
+                    f"ОБЪЕКТЫ ПРОЕКТИРОВАНИЯ:\n{object_list}\n\n"
+                    f"{book_list}"
+                )
+                resp0b = client.messages.create(
+                    model=settings.extraction_model,
+                    max_tokens=200,
+                    system=system_block,
+                    messages=[{"role": "user", "content": step0b_msg}],
+                )
+                raw = resp0b.content[0].text.strip() if resp0b.content else ""
                 detected_codes = [c.strip() for c in raw.split(",") if c.strip()]
 
     # ── Pass 1: extract entities ──────────────────────────────────────────────
@@ -935,13 +984,35 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
         if not detected_codes:
             book_list = _build_book_list(db)
             if book_list:
-                step0_content = (
-                    "Определи, какой справочник применим к данному ТЗ.\n"
-                    "Ответь ТОЛЬКО кодами через запятую, без пояснений.\n\n"
-                    f"{book_list}\n\n"
+                # ── Step 0a: extract object list from TZ ──────────────────────
+                step0a_content = (
+                    "Прочитай техническое задание и составь краткий список объектов проектирования.\n"
+                    "Для каждого объекта укажи: название, тип (здание/сооружение/сеть/изыскания), "
+                    "основные параметры если указаны в ТЗ.\n"
+                    "Не упоминай справочники или нормативы — только объекты.\n"
+                    "Ответ: нумерованный список, один объект на строку.\n\n"
                     "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
                 )
-                raw = await _call_plain([{"role": "user", "content": step0_content}], max_tokens=100)
+                object_list = await _call_plain(
+                    [{"role": "user", "content": step0a_content}], max_tokens=400
+                )
+
+                # ── Step 0b: match object list to books ───────────────────────
+                step0b_content = (
+                    "На основе списка объектов проектирования выбери применимые справочники.\n"
+                    "Правила:\n"
+                    "1. Для каждого объекта найди справочник, чьи «Примеры объектов» "
+                    "совпадают по типу, назначению или отрасли — даже если терминология отличается.\n"
+                    "2. Промышленные объекты (завод, цех, производство) → "
+                    "отраслевой справочник, не общегражданский.\n"
+                    "3. Изыскания → справочник изысканий (НЗ).\n"
+                    "Ответь ТОЛЬКО кодами через запятую. Пример: СБЦП 81-2001-17, НЗ-2025-МС281-ИГИ\n\n"
+                    f"ОБЪЕКТЫ ПРОЕКТИРОВАНИЯ:\n{object_list}\n\n"
+                    f"{book_list}"
+                )
+                raw = await _call_plain(
+                    [{"role": "user", "content": step0b_content}], max_tokens=200
+                )
                 detected_codes = [c.strip() for c in raw.split(",") if c.strip()]
 
     # ── Pass 1 ────────────────────────────────────────────────────────────────

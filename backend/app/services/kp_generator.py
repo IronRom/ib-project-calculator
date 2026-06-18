@@ -249,18 +249,31 @@ def generate_kp_word(
     doc.add_paragraph().paragraph_format.space_after = Pt(4)
 
     # ── Cost table ────────────────────────────────────────────────────────────
+    positions = result.get("positions", [])
+
+    # Survey positions are stage-embedded (_stage_embedded=True); group by section_name
+    from collections import defaultdict
+    survey_groups: dict[str, float] = defaultdict(float)
+    for p in positions:
+        if p.get("_stage_embedded"):
+            survey_groups[p.get("section_name", "Инженерные изыскания")] += float(p.get("cost", 0))
+    total_survey_cost = sum(survey_groups.values())
+    design_cost = cost_with_stage - total_survey_cost
+
     lines: list[tuple[str, float]] = []
+    for label, scost in survey_groups.items():
+        lines.append((label, scost * (1 + vat_rate)))
     if stage == "П+Р":
-        pd_cost = cost_with_stage * 0.4 * (1 + vat_rate)
-        rd_cost = cost_with_stage * 0.6 * (1 + vat_rate)
-        lines = [
+        pd_cost = design_cost * 0.4 * (1 + vat_rate)
+        rd_cost = design_cost * 0.6 * (1 + vat_rate)
+        lines += [
             ("Разработка проектной документации", pd_cost),
             ("Разработка рабочей документации",   rd_cost),
         ]
     elif stage == "П":
-        lines = [("Разработка проектной документации", total_with_vat)]
+        lines.append(("Разработка проектной документации", design_cost * (1 + vat_rate)))
     else:
-        lines = [("Разработка рабочей документации", total_with_vat)]
+        lines.append(("Разработка рабочей документации", design_cost * (1 + vat_rate)))
 
     table = doc.add_table(rows=0, cols=3)
     col_widths = [Cm(1.5), Cm(10.5), Cm(4.5)]
@@ -491,18 +504,30 @@ def generate_kp_pdf(
     story.append(Spacer(1, 0.5*cm))
 
     # ── Cost table ────────────────────────────────────────────────────────────
+    positions = result.get("positions", [])
+
+    from collections import defaultdict
+    survey_groups: dict[str, float] = defaultdict(float)
+    for p in positions:
+        if p.get("_stage_embedded"):
+            survey_groups[p.get("section_name", "Инженерные изыскания")] += float(p.get("cost", 0))
+    total_survey_cost = sum(survey_groups.values())
+    design_cost = cost_with_stage - total_survey_cost
+
     lines: list[tuple[str, float]] = []
+    for label, scost in survey_groups.items():
+        lines.append((label, scost * (1 + vat_rate)))
     if stage == "П+Р":
-        pd_cost = cost_with_stage * 0.4 * (1 + vat_rate)
-        rd_cost = cost_with_stage * 0.6 * (1 + vat_rate)
-        lines = [
+        pd_cost = design_cost * 0.4 * (1 + vat_rate)
+        rd_cost = design_cost * 0.6 * (1 + vat_rate)
+        lines += [
             ("Разработка проектной документации", pd_cost),
             ("Разработка рабочей документации",   rd_cost),
         ]
     elif stage == "П":
-        lines = [("Разработка проектной документации", total_with_vat)]
+        lines.append(("Разработка проектной документации", design_cost * (1 + vat_rate)))
     else:
-        lines = [("Разработка рабочей документации", total_with_vat)]
+        lines.append(("Разработка рабочей документации", design_cost * (1 + vat_rate)))
 
     col_w = [1.5*cm, 10.5*cm, 4.5*cm]
     th_style = style(align=TA_CENTER, size=11, bold=True)

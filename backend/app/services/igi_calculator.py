@@ -26,6 +26,21 @@ from app.models import BookCondition, PriceQuarterlyIndex, ReferenceBook, Refere
 _CAT_ROW_RANGES = {1: (1, 7), 2: (8, 15), 3: (16, 24)}
 _RE_ROW_NUM = re.compile(r'п\.(\d+)')
 
+_SURVEY_LABEL_MAP = [
+    ("геолог", "Инженерно-геологические изыскания"),
+    ("ИГИ",   "Инженерно-геологические изыскания"),
+    ("геодез", "Инженерно-геодезические изыскания"),
+    ("геофиз", "Инженерно-геофизические изыскания"),
+    ("гидромет", "Инженерно-гидрометеорологические изыскания"),
+    ("экол",   "Инженерно-экологические изыскания"),
+]
+
+def _survey_label(book_code: str) -> str:
+    for keyword, label in _SURVEY_LABEL_MAP:
+        if keyword in book_code:
+            return label
+    return "Инженерные изыскания"
+
 
 def _get_survey_index(db: Session, base_year: int = 2024) -> tuple[float, str, str]:
     """Return (index_value, period_label, source_ref) for survey work.
@@ -154,6 +169,7 @@ def calculate_igi(
             continue
 
         book_code = survey.get("book_code", f"book#{book_version_id}")
+        survey_section = _survey_label(book_code)
         k1 = float(survey.get("k1", 0.70))
         winter_pct = float(survey.get("winter_pct", 0.0))
         unfavorable_months = float(survey.get("unfavorable_months", 0.0))
@@ -257,7 +273,7 @@ def calculate_igi(
                 "row_num": row_num,
                 "used_minimum": False,
                 "section_num": 0,
-                "section_name": "ИГИ",
+                "section_name": survey_section,
                 "work_category": work_cat,
                 "_stage_embedded": True,  # ИГИ costs are not split by П/Р stage
             })
@@ -291,7 +307,7 @@ def calculate_igi(
                     "row_num": "",
                     "used_minimum": False,
                     "section_num": 0,
-                    "section_name": "ИГИ",
+                    "section_name": survey_section,
                     "work_category": "report",
                     "_stage_embedded": True,  # ИГИ costs are not split by П/Р stage
                 })
