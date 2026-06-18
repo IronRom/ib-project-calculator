@@ -1,11 +1,5 @@
 # ИБ Калькулятор ПИР
 
-## Obsidian
-
-Все задачи и лог — через Obsidian vault13.
-Проект: `01 Actions/Projects/Project - IB AI Calculator PIR.md`
-Каждое изменение кода требует задачи в vault. Команда: `obsidian vault=vault13 ...`
-
 ## Архитектура
 
 > При изменении архитектуры — вносить правки в эту секцию.

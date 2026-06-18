@@ -148,6 +148,7 @@ class BookObjectType(Base):
     book_version_id = Column(Integer, ForeignKey("reference_books.id"), nullable=False, index=True)
     name = Column(Text, nullable=False)
     table_num = Column(Integer, nullable=True)
+    work_category = Column(String(20), nullable=True, default="field")
     notes = Column(Text, nullable=True)
 
     book = relationship("ReferenceBook", back_populates="object_types")
