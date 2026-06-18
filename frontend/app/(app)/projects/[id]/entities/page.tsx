@@ -32,6 +32,8 @@ interface EntityOverride {
   x_value?: number | null
   x_unit?: string
   deleted?: boolean
+  pd_sections_pct?: number | null
+  rd_sections_pct?: number | null
 }
 
 // ── Column width constants ────────────────────────────────────────────────────
@@ -109,10 +111,12 @@ export default function EntitiesPage() {
       // Save all pending overrides
       const saves = Object.entries(overrides).map(([idxStr, ov]) => {
         const idx = Number(idxStr)
-        const patch: Partial<{ x_value: number | null; x_unit: string; deleted: boolean }> = {}
-        if (ov.x_value !== undefined) patch.x_value = ov.x_value
-        if (ov.x_unit  !== undefined) patch.x_unit  = ov.x_unit
-        if (ov.deleted !== undefined) patch.deleted  = ov.deleted
+        const patch: Partial<{ x_value: number | null; x_unit: string; deleted: boolean; pd_sections_pct: number | null; rd_sections_pct: number | null }> = {}
+        if (ov.x_value !== undefined)          patch.x_value          = ov.x_value
+        if (ov.x_unit  !== undefined)          patch.x_unit           = ov.x_unit
+        if (ov.deleted !== undefined)          patch.deleted           = ov.deleted
+        if (ov.pd_sections_pct !== undefined)  patch.pd_sections_pct  = ov.pd_sections_pct
+        if (ov.rd_sections_pct !== undefined)  patch.rd_sections_pct  = ov.rd_sections_pct
         return Object.keys(patch).length ? patchEntity(Number(id), Number(calcId), idx, patch) : Promise.resolve()
       })
       await Promise.all(saves)
@@ -416,6 +420,7 @@ function EntityTable({
                         isLast={hasMultipleSections ? false : isLastOverall}
                         override={ov}
                         isDeleted={isDeleted}
+                        stage={calcResult?.stage ?? 'П+Р'}
                         onOverride={(patch) => onOverride(globalIdx, patch)}
                       />
                     )
@@ -443,15 +448,17 @@ function EntityTable({
 }
 
 // ── Single entity row ─────────────────────────────────────────────────────────
-function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, override, isDeleted, onOverride }: {
+function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, override, isDeleted, stage, onOverride }: {
   entity: ExtractedEntity; entityIdx: number; projectId: number; calcId: number
   unitCheck?: UnitCheckItem; isLast: boolean
   override: EntityOverride; isDeleted: boolean
+  stage?: string
   onOverride: (patch: Partial<EntityOverride>) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [inputVal, setInputVal] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const showStagePct = stage === 'П+Р' && !isDeleted
 
   const effectiveX    = override.x_value !== undefined ? override.x_value : entity.x_value
   const effectiveUnit = override.x_unit  !== undefined ? override.x_unit  : entity.x_unit
@@ -530,7 +537,10 @@ function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, ov
     </div>
   )
 
-  const hasFooter = !!(entity.notes || entity.tz_quote || (xMissing && entity.x_value_missing_reason))
+  const hasPct = showStagePct
+  const pdPct = override.pd_sections_pct ?? entity.pd_sections_pct ?? null
+  const rdPct = override.rd_sections_pct ?? entity.rd_sections_pct ?? null
+  const hasFooter = !!(entity.notes || entity.tz_quote || (xMissing && entity.x_value_missing_reason) || hasPct)
   const rowBg = isDeleted ? 'color-mix(in srgb, var(--danger-500) 8%, transparent)' : undefined
 
   return (
@@ -571,6 +581,47 @@ function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, ov
             )}
             {entity.notes && (
               <div style={{ fontSize: 12, color: 'var(--fg-3)', fontStyle: 'italic', ...strikeStyle }}>{entity.notes}</div>
+            )}
+            {hasPct && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 6 }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-3)', fontWeight: 600 }}>Разделы %:</span>
+                {(['ПД', 'РД'] as const).map((lbl) => {
+                  const field = lbl === 'ПД' ? 'pd_sections_pct' : 'rd_sections_pct'
+                  const val = lbl === 'ПД' ? pdPct : rdPct
+                  return (
+                    <label key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                      <span style={{
+                        padding: '1px 5px', borderRadius: 3, fontSize: 10, fontWeight: 700,
+                        background: lbl === 'ПД' ? '#dbeafe' : '#f3f4f6',
+                        color: lbl === 'ПД' ? '#1d4ed8' : '#6b7280',
+                        border: '1px solid #e5e7eb',
+                      }}>{lbl}</span>
+                      <input
+                        type="number"
+                        min={0} max={100} step={0.5}
+                        placeholder="100"
+                        value={val != null ? Math.round(val * 100) : ''}
+                        onChange={e => {
+                          const n = parseFloat(e.target.value)
+                          onOverride({ [field]: isNaN(n) ? null : n / 100 } as Partial<EntityOverride>)
+                        }}
+                        style={{
+                          width: 56, fontFamily: 'var(--font-mono)', fontSize: 12,
+                          padding: '2px 5px', background: 'var(--bg-default)',
+                          border: '1px solid var(--border-default)', borderRadius: 4,
+                          color: 'var(--fg-1)', outline: 'none', textAlign: 'right',
+                        }}
+                      />
+                      <span style={{ color: 'var(--fg-3)', fontSize: 11 }}>%</span>
+                    </label>
+                  )
+                })}
+                <span style={{ fontSize: 11, color: 'var(--fg-4)' }}>
+                  {pdPct != null || rdPct != null
+                    ? `ПД×${((pdPct ?? 1) * 0.4 * 100).toFixed(1)}% + РД×${((rdPct ?? 1) * 0.6 * 100).toFixed(1)}% от базы`
+                    : 'по умолчанию: ПД 40% + РД 60%'}
+                </span>
+              </div>
             )}
           </td>
         </tr>

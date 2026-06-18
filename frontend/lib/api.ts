@@ -325,7 +325,7 @@ export function downloadExportKPPdf(projectId: number, calcId: number): Promise<
   return _downloadFile(`/projects/${projectId}/calculations/${calcId}/export-kp-pdf`, `КП_${calcId}.pdf`)
 }
 
-export function patchEntity(projectId: number, calcId: number, entityIdx: number, patch: Partial<{ x_value: number | null; x_unit: string; deleted: boolean }>) {
+export function patchEntity(projectId: number, calcId: number, entityIdx: number, patch: Partial<{ x_value: number | null; x_unit: string; deleted: boolean; pd_sections_pct: number | null; rd_sections_pct: number | null }>) {
   return request<ExtractedEntity>(`/projects/${projectId}/calculations/${calcId}/entities/${entityIdx}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
