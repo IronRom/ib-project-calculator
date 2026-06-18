@@ -34,7 +34,8 @@ def _item(work_category, table_num, row_num, volume, b, x_unit="п.м", deleted=
 
 
 @patch("app.services.igi_calculator._get_survey_index")
-def test_field_item_applies_k1_and_winter(mock_idx):
+@patch("app.services.igi_calculator._get_k1_for_table", return_value=None)
+def test_field_item_applies_k1_and_winter(mock_k1, mock_idx):
     mock_idx.return_value = (1.0, "I кв. 2024 г.", "Письмо МС")
     db = MagicMock()
 

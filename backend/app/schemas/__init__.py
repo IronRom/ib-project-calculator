@@ -273,6 +273,7 @@ class IgiItem(BaseModel):
     row_num: str = ""
     description: str = ""
     volume: float
+    a: float = 0                        # fixed cost component (ПЗ1п), руб at base year; 0 when not applicable
     x_unit: str = ""                    # unit label from reference_rows, e.g. "п.м"
     b: float                            # rate in rubles from reference_rows (at base year)
     deleted: bool = False

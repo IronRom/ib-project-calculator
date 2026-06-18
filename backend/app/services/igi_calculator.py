@@ -4,20 +4,24 @@
 Base prices: 01.01.2024 (руб).
 
 Formula per work category:
-  field:   b × volume × k1 × (1 + winter_pct) × k2 × index
-  lab:     b × volume × index
-  kameral: b × volume × index
-  program: b × volume × index
+  field:   (a + b × volume) × k1 × (1 + winter_pct) × k2 × index
+  lab:     (a + b × volume) × index
+  kameral: (a + b × volume) × index
+  program: (a + b × volume) × index
   report:  auto-computed from total kameral cost via Table 65 lookup (see _lookup_report_cost)
+
+K1 coefficient:
+  Looked up per table_num from book_conditions (coeff_key="k1").
+  Falls back to survey.k1 (default 0.70) when no DB entry for that table.
 """
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import PriceQuarterlyIndex, ReferenceBook, ReferenceRow
+from app.models import BookCondition, PriceQuarterlyIndex, ReferenceBook, ReferenceRow
 
 _CAT_ROW_RANGES = {1: (1, 7), 2: (8, 15), 3: (16, 24)}
 _RE_ROW_NUM = re.compile(r'п\.(\d+)')
@@ -44,6 +48,28 @@ def _get_survey_index(db: Session, base_year: int = 2024) -> tuple[float, str, s
         period = f"{roman.get(rec.quarter, str(rec.quarter))} квартал {rec.year} г."
         return float(rec.index_value), period, rec.source_ref
     return 1.0, "—", f"Индекс изысканий к {base_year} не задан"
+
+
+def _get_k1_for_table(
+    db: Session, book_version_id: int, table_num: int
+) -> Optional[float]:
+    """Return per-table K1 from book_conditions, or None if not defined.
+
+    Looks up BookCondition where coeff_key="k1" and table_num matches.
+    Returns coeff_min as float when found; None means caller should use survey.k1 fallback.
+    """
+    rec = (
+        db.query(BookCondition)
+        .filter(
+            BookCondition.book_version_id == book_version_id,
+            BookCondition.table_num == table_num,
+            BookCondition.coeff_key == "k1",
+        )
+        .first()
+    )
+    if rec and rec.coeff_min is not None:
+        return float(rec.coeff_min)
+    return None
 
 
 def _lookup_report_cost(
@@ -134,6 +160,7 @@ def calculate_igi(
 
         for item in items:
             work_cat = item.get("work_category", "field")
+            a = float(item.get("a", 0))
             b = float(item.get("b", 0))
             volume = float(item.get("volume", 0))
             x_unit = item.get("x_unit", "")
@@ -142,18 +169,26 @@ def calculate_igi(
             desc = item.get("description", "")
             otype_name = item.get("object_type_name", "")
 
+            # Base cost: a + b × volume (a=0 when not applicable)
+            base = a + b * volume
+
             if work_cat == "field":
-                cost = b * volume * k1 * (1 + winter_pct) * k2 * index_val
+                # Per-table K1 from book_conditions; fall back to survey.k1
+                table_k1 = _get_k1_for_table(db, book_version_id, table_num)
+                effective_k1 = table_k1 if table_k1 is not None else k1
+
+                cost = base * effective_k1 * (1 + winter_pct) * k2 * index_val
                 coeff_note = (
-                    f"К1={k1}"
+                    f"К1={effective_k1}"
                     + (f"; зима {int(winter_pct*100)}%" if winter_pct else "")
                     + (f"; К2={k2}" if k2 != 1.0 else "")
                 )
             elif work_cat in ("lab", "kameral", "program"):
-                cost = b * volume * index_val
+                effective_k1 = k1  # not used, but keep variable consistent
+                cost = base * index_val
                 coeff_note = ""
                 if work_cat == "kameral":
-                    kameral_total_base += b * volume  # accumulate pre-index
+                    kameral_total_base += base  # accumulate pre-index
             else:
                 errors.append(f"ИГИ: неизвестная work_category '{work_cat}'")
                 continue
@@ -162,9 +197,13 @@ def calculate_igi(
             if coeff_note:
                 just += f" [{coeff_note}]"
 
-            formula = f"{int(b)}×{volume}"
+            # Formula string: show (a+b×vol) when a≠0, else b×vol
+            if a:
+                formula = f"({int(a)}+{int(b)}×{volume})"
+            else:
+                formula = f"{int(b)}×{volume}"
             if work_cat == "field":
-                formula += f"×{k1}"
+                formula += f"×{effective_k1}"
                 if winter_pct:
                     formula += f"×{1 + winter_pct:.2f}"
                 if k2 != 1.0:
@@ -182,7 +221,7 @@ def calculate_igi(
                 "justification": just,
                 "formula": formula,
                 "cost": round(cost, 2),
-                "cost_base": round(b * volume, 2),
+                "cost_base": round(base, 2),
                 "book_code": book_code,
                 "price_base_year": price_base_year,
                 "price_index": index_val,
