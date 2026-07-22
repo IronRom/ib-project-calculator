@@ -179,9 +179,16 @@ class RowMatch:
     used_minimum: bool = False  # True when x_value was None and minimum row was used
     # 707/пр п.131 ф.8.4/8.5: X < Xмин/2 → цена на X=Xмин/2, умноженная на Кэ (≥0.1)
     extrap_scale: float = 1.0
-    # МУ №620 Прил.1: экстраполяция вверх допустима при X ≤ 2×X_гран;
-    # выше — X_задан в формуле ограничивается 2×X_гран (практика эксп. смет)
+    # МУ №620 п.2.1.3: экстраполяция применима в пределах [Xмин/2; 2×Xмакс];
+    # вне пределов п.2.1.4 требует калькуляции 3П — движок консервативно
+    # ограничивает X (x_capped) и предупреждает. Только для pricing_method='mu620'
     x_capped: Optional[float] = None
+    # pricing_method='mrr': экстраполяция вверх по ф.2.2 сборников МРР
+    # (Ц = a + в·Xмакс + в·(Xоб − Xмакс)·0,5) — цена считается напрямую
+    mrr_extrap: bool = False
+    # объявленный object_type_id не дал строк в таблице — матч без фильтра
+    # по типу (рискован: мог взять строку другого объекта)
+    type_fallback: bool = False
     # 707/пр п.133 ф.8.6–8.8: a-only таблица → цена интер/экстраполирована напрямую (тыс.руб)
     override_price_thous: Optional[float] = None
 
@@ -235,6 +242,7 @@ def _match_row(
     x_value: Optional[float],
     x_unit: str,
     object_type_id: Optional[int] = None,
+    pricing_method: str = "mu620",
 ) -> Optional[RowMatch]:
     q = db.query(ReferenceRow).filter(
         ReferenceRow.book_version_id == book_version_id,
@@ -244,7 +252,9 @@ def _match_row(
         q = q.filter(ReferenceRow.object_type_id == object_type_id)
     all_rows: list[ReferenceRow] = q.all()
     # Fallback: type_id gave no rows → retry without type filter
+    type_fallback = False
     if not all_rows and object_type_id is not None:
+        type_fallback = True
         all_rows = (
             db.query(ReferenceRow)
             .filter(
@@ -256,13 +266,17 @@ def _match_row(
     if not all_rows:
         return None
 
+    def _mk(*args, **kw):
+        kw.setdefault("type_fallback", type_fallback)
+        return RowMatch(*args, **kw)
+
     # ── X-fallback: use minimum row when X is unknown ─────────────────────
     if x_value is None:
         candidates_with_min = [r for r in all_rows if r.x_min is not None]
         min_row = min(candidates_with_min, key=lambda r: float(r.x_min)) \
                   if candidates_with_min else all_rows[0]
         x_eff = float(min_row.x_min) if min_row.x_min is not None else 0.0
-        return RowMatch(min_row, x_eff, False, None, "", used_minimum=True)
+        return _mk(min_row, x_eff, False, None, "", used_minimum=True)
 
     x_unit_norm = _normalize_unit(x_unit)
 
@@ -294,7 +308,7 @@ def _match_row(
             x_min = float(r.x_min) if r.x_min is not None else None
             x_max = float(r.x_max) if r.x_max is not None else None
             if (x_min is None or x_eff >= x_min) and (x_max is None or x_eff <= x_max):
-                return RowMatch(r, x_eff, False, None, note)
+                return _mk(r, x_eff, False, None, note)
 
     # Pass 2: extrapolation — boundary row (МУ №620 Прил.1 / 707/пр п.131, 133)
     def _join(base: str, extra: str) -> str:
@@ -306,7 +320,7 @@ def _match_row(
         ao = _a_only_price(rows, x_eff)
         if ao is not None:
             price, brow, extrap_note = ao
-            return RowMatch(
+            return _mk(
                 brow, x_eff, True, None, _join(note, extrap_note),
                 override_price_thous=price,
             )
@@ -316,34 +330,55 @@ def _match_row(
 
         if maxes and x_eff > max(v for v, _ in maxes):
             bval, brow = max(maxes, key=lambda t: t[0])
-            if bval > 0 and x_eff > 2 * bval:
-                extrap_note = (
-                    f"экстраполяция (X={x_eff:.4g} > 2×X_гран={2 * bval:.4g}, "
-                    f"X_расч ограничен 2×X_гран — МУ №620 Прил.1)"
+            if pricing_method == "mrr":
+                # МРР ф.2.2: Ц = a + в·Xмакс + в·(Xоб − Xмакс)·0,5
+                extrap_note = f"МРР ф.2.2 (X={x_eff:.4g} > Xмакс={bval:.4g}, ΔX×0,5)"
+                return _mk(
+                    brow, x_eff, True, bval, _join(note, extrap_note),
+                    mrr_extrap=True,
                 )
-                return RowMatch(
+            if pricing_method == "mu620" and bval > 0 and x_eff > 2 * bval:
+                # МУ №620 п.2.1.3: за 2×Xмакс формула неприменима, п.2.1.4
+                # требует калькуляции 3П; консервативно ограничиваем X
+                extrap_note = (
+                    f"экстраполяция (X={x_eff:.4g} > 2×Xмакс={2 * bval:.4g}, "
+                    f"X_расч ограничен — МУ №620 п.2.1.3, далее ф.3П)"
+                )
+                return _mk(
                     brow, x_eff, True, bval, _join(note, extrap_note),
                     x_capped=2 * bval,
                 )
+            # 707/пр п.131-2 ф.8.3: без ограничения сверху
             extrap_note = f"экстраполяция (X={x_eff:.4g} > {bval:.4g})"
-            return RowMatch(brow, x_eff, True, bval, _join(note, extrap_note))
+            return _mk(brow, x_eff, True, bval, _join(note, extrap_note))
 
         if mins and x_eff < min(v for v, _ in mins):
             bval, brow = min(mins, key=lambda t: t[0])
+            if pricing_method == "mu620" and bval > 0 and x_eff < 0.5 * bval:
+                # МУ №620 п.2.1.3: ниже Xмин/2 формула неприменима (ф.3П);
+                # консервативно считаем в точке Xмин/2
+                extrap_note = (
+                    f"экстраполяция (X={x_eff:.4g} < Xмин/2={0.5 * bval:.4g}, "
+                    f"X_расч ограничен — МУ №620 п.2.1.3, далее ф.3П)"
+                )
+                return _mk(
+                    brow, x_eff, True, bval, _join(note, extrap_note),
+                    x_capped=0.5 * bval,
+                )
             # 707/пр п.131 ф.8.4/8.5: X меньше половины минимального показателя →
             # цена на X=Xмин/2 (по ф.8.2), умноженная на Кэ = X/(0.5·Xмин), но не менее 0.1
-            if bval > 0 and x_eff < 0.5 * bval:
+            if pricing_method != "mrr" and bval > 0 and x_eff < 0.5 * bval:
                 scale = max(0.1, x_eff / (0.5 * bval))
                 extrap_note = (
                     f"707/пр п.131 ф.8.4 (X={x_eff:.4g} < Xмин/2={0.5 * bval:.4g}, "
                     f"Кэ={scale:.3g})"
                 )
-                return RowMatch(
+                return _mk(
                     brow, x_eff, True, bval, _join(note, extrap_note),
                     extrap_scale=scale,
                 )
             extrap_note = f"экстраполяция (X={x_eff:.4g} < {bval:.4g})"
-            return RowMatch(brow, x_eff, True, bval, _join(note, extrap_note))
+            return _mk(brow, x_eff, True, bval, _join(note, extrap_note))
 
     return None
 
@@ -850,7 +885,10 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             errors.append(f"{object_name}: не определена таблица СБЦП")
             continue
 
-        match = _match_row(db, book.id, table_num, x_value, x_unit, object_type_id)
+        match = _match_row(
+            db, book.id, table_num, x_value, x_unit, object_type_id,
+            pricing_method=getattr(book, "pricing_method", "mu620") or "mu620",
+        )
         if not match:
             errors.append(
                 f"{object_name}: строка для X={x_value} {x_unit} в таблице №{table_num} не найдена"
@@ -861,23 +899,37 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         a = float(row.a) if row.a is not None else 0.0
         b = float(row.b) if row.b is not None else 0.0
 
-        # МУ №620 Прил.1 / 707/пр п.131 extrapolation
+        if match.type_fallback:
+            warnings.append(
+                f"{object_name}: заявленный тип объекта не имеет строк в таблице "
+                f"№{table_num} {book.code} — строка подобрана БЕЗ фильтра по типу "
+                f"(«{(row.description or '')[:60]}»), проверьте позицию"
+            )
+
+        # Экстраполяция: МУ №620 Прил.1 / 707/пр п.131 / МРР ф.2.2
         if match.extrapolated and match.x_boundary is not None:
-            if match.extrap_scale != 1.0:
+            if match.mrr_extrap:
+                # МРР ф.2.2: Ц = a + в·Xмакс + в·(Xоб − Xмакс)·0,5 ≡
+                # a + в·(Xмакс + 0,5·ΔX) — сводится к эффективному X
+                x_calc = match.x_boundary + 0.5 * (match.x_effective - match.x_boundary)
+            elif match.extrap_scale != 1.0:
                 # 707/пр ф.8.4: цена считается в точке X=Xмин/2 (по ф.8.2), затем ×Кэ
                 x_calc = 0.4 * match.x_boundary + 0.6 * (0.5 * match.x_boundary)
+            elif match.x_capped is not None:
+                # МУ №620 п.2.1.3: X ограничен пределом применимости формулы
+                x_calc = 0.4 * match.x_boundary + 0.6 * match.x_capped
             else:
-                x_for_extrap = match.x_capped if match.x_capped is not None else match.x_effective
-                x_calc = 0.4 * match.x_boundary + 0.6 * x_for_extrap
+                x_calc = 0.4 * match.x_boundary + 0.6 * match.x_effective
         else:
             x_calc = match.x_effective
 
         if match.x_capped is not None:
+            side = "выше 2×Xмакс" if match.x_capped > match.x_boundary else "ниже Xмин/2"
             warnings.append(
-                f"{object_name}: X={_fmt_ru(match.x_effective)} превышает верхнюю границу "
-                f"таблицы №{table_num} более чем вдвое — в формуле X ограничен "
-                f"2×X_гран={_fmt_ru(match.x_capped)} (МУ №620 Прил.1). Проверьте выбор "
-                f"таблицы/справочника или рассмотрите индивидуальный расчёт"
+                f"{object_name}: X={_fmt_ru(match.x_effective)} {side} таблицы "
+                f"№{table_num} — формула экстраполяции неприменима (МУ №620 п.2.1.3), "
+                f"требуется калькуляция затрат (ф.3П). Консервативно X_расч ограничен "
+                f"{_fmt_ru(match.x_capped)}; проверьте выбор таблицы/справочника"
             )
 
         # МУ №620 п.3.14: apply coefficients (resolve AI flag→actual DB value first)

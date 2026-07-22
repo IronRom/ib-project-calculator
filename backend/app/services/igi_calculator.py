@@ -103,6 +103,10 @@ _SURVEY_LABEL_MAP = [
     ("экол",   "Инженерно-экологические изыскания"),
 ]
 
+def _fmt_money(v: float) -> str:
+    return f"{v:,.0f}".replace(",", " ")
+
+
 def _survey_label(book_code: str) -> str:
     for keyword, label in _SURVEY_LABEL_MAP:
         if keyword in book_code:
@@ -284,6 +288,8 @@ def calculate_igi(
         lab_base = 0.0
         kameral_base = 0.0
         field_pz_base = 0.0
+        # текущие (проиндексированные) суммы для процентных позиций
+        cur_cost = {"field": 0.0, "lab": 0.0, "kameral": 0.0, "percent": 0.0}
 
         items = [it for it in survey.get("items", []) if not it.get("deleted")]
 
@@ -292,14 +298,58 @@ def calculate_igi(
             a = float(item.get("a", 0))
             b = float(item.get("b", 0))
             volume = float(item.get("volume", 0))
+            k_item = float(item.get("k", 1.0) or 1.0)
             x_unit = item.get("x_unit", "")
             table_num = item.get("table_num", 0)
             row_num = item.get("row_num", "")
             desc = item.get("description", "")
             otype_name = item.get("object_type_name", "")
 
-            # Base cost: a + b × volume (a=0 when not applicable)
-            base = a + b * volume
+            # ── Процентная позиция (МРР гл.3: транспорт табл.2.2,
+            # организация/ликвидация табл.2.3, отчёт «% от камеральных») ──
+            if work_cat == "percent":
+                pct = float(item.get("pct", 0))
+                pbase = item.get("percent_base", "field")
+                if pbase == "field+percent":
+                    base_sum = cur_cost["field"] + cur_cost["percent"]
+                else:
+                    base_sum = cur_cost.get(pbase, 0.0)
+                cost = base_sum * pct / 100.0
+                counts_as = item.get("counts_as") or "percent"
+                cur_cost[counts_as] = cur_cost.get(counts_as, 0.0) + cost
+                if counts_as == "kameral":
+                    kameral_base += cost / index_val if index_val else 0.0
+                positions.append({
+                    "num": len(positions) + 1,
+                    "name": otype_name or desc,
+                    "row_description": desc,
+                    "unit": "%",
+                    "quantity": pct,
+                    "item_count": 1,
+                    "justification": (
+                        f"{book_code}, табл. {table_num} {row_num} "
+                        f"({pct}% от {pbase}: {round(base_sum, 2)} руб)"
+                    ).strip(),
+                    "formula": f"{_fmt_money(base_sum)}×{pct}%",
+                    "cost": round(cost, 2),
+                    "cost_base": round(cost / index_val, 2) if index_val else 0,
+                    "book_code": book_code,
+                    "price_base_year": price_base_year,
+                    "price_index": index_val,
+                    "price_index_period": idx_period,
+                    "price_index_justification": idx_just,
+                    "table_num": table_num,
+                    "row_num": row_num,
+                    "used_minimum": False,
+                    "section_num": 0,
+                    "section_name": survey_section,
+                    "work_category": "percent",
+                    "_stage_embedded": True,
+                })
+                continue
+
+            # Base cost: (a + b × volume) × k (множитель примечаний таблицы)
+            base = (a + b * volume) * k_item
 
             if work_cat == "field":
                 # Per-table K1 from book_conditions; fall back to survey.k1
@@ -308,6 +358,7 @@ def calculate_igi(
 
                 cost = base * effective_k1 * (1 + winter_factor) * k2 * index_val
                 field_pz_base += base * effective_k1
+                cur_cost["field"] += cost
                 coeff_note = (
                     f"К1={effective_k1}"
                     + (f"; зима {round(winter_factor * 100, 1)}%" if winter_factor else "")
@@ -320,8 +371,10 @@ def calculate_igi(
                 # Accumulate for Table 65 (technical report X parameter)
                 if work_cat == "lab":
                     lab_base += base
+                    cur_cost["lab"] += cost
                 elif work_cat == "kameral":
                     kameral_base += base
+                    cur_cost["kameral"] += cost
             else:
                 errors.append(f"ИГИ: неизвестная work_category '{work_cat}'")
                 continue
@@ -334,6 +387,8 @@ def calculate_igi(
                 formula = f"({int(a)}+{int(b)}×{volume})"
             else:
                 formula = f"{int(b)}×{volume}"
+            if k_item != 1.0:
+                formula += f"×{k_item}"
             if work_cat == "field":
                 formula += f"×{effective_k1}"
                 if winter_factor:

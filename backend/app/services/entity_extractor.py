@@ -29,9 +29,16 @@ def _build_book_list(db) -> str:
     books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
     if not books:
         return ""
-    lines = ["Активные справочники (код, название, примеры объектов):"]
+    lines = [
+        "Активные справочники (код, название, примеры объектов):",
+        "ПРАВИЛО РЕГИОНА: справочники с пометкой [Регион: …] применяй ТОЛЬКО "
+        "для объектов в этом регионе, и для таких объектов они ПРИОРИТЕТНЕЕ "
+        "федеральных аналогов. НЕ создавай дублирующих позиций по региональному "
+        "и федеральному справочнику одновременно — выбери один.",
+    ]
     for b in books:
-        lines.append(f"\n  {b.code} — {b.official_name or b.code}")
+        region_tag = f" [Регион: {b.region}]" if getattr(b, "region", None) else ""
+        lines.append(f"\n  {b.code} — {b.official_name or b.code}{region_tag}")
         # Uniform sample across the book: pick one type per table, evenly spaced
         all_types = (
             db.query(BookObjectType)

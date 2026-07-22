@@ -275,7 +275,7 @@ class AsutpModulePatch(BaseModel):
 
 class IgiItem(BaseModel):
     """One line item in a geological survey estimate."""
-    work_category: Literal["field", "lab", "kameral", "program"] = "field"
+    work_category: Literal["field", "lab", "kameral", "program", "percent"] = "field"
     object_type_name: str = ""          # display name, e.g. "Бурение колонковым способом"
     table_num: int
     row_num: str = ""
@@ -286,6 +286,18 @@ class IgiItem(BaseModel):
     b: float                            # rate in rubles from reference_rows (at base year)
     deleted: bool = False
     notes: str = ""
+    # множитель примечаний к таблице (например, МРР-3.1 табл.3.1.4: 0,7×1,3)
+    k: float = 1.0
+    # Процентные позиции (МРР гл.3: транспорт табл.2.2, орг/ликвидация табл.2.3,
+    # техотчёт «% от камеральных»): cost = pct% × Σ уже посчитанных позиций базы.
+    # percent_base: 'field' | 'lab' | 'kameral' | 'field+percent'
+    # ('field+percent' = полевые + ранее добавленные процентные, напр. транспорт)
+    pct: float = 0.0
+    percent_base: str = "field"
+    # категория, в которую зачисляется результат percent-позиции
+    # (например «камеральная обработка 20% от лабораторных» — это КАМЕРАЛЬНАЯ
+    # работа: counts_as='kameral' включает её в базу техотчёта)
+    counts_as: str = ""
 
 
 class GeologicalSurvey(BaseModel):

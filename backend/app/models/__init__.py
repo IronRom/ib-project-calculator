@@ -155,7 +155,12 @@ class ReferenceBook(Base):
     status = Column(String(30), nullable=False, default="requires_validation")
     is_active = Column(Boolean, nullable=False, default=False)
     price_base_year = Column(Integer, nullable=False, default=2001)
-    calc_method = Column(String(20), nullable=False, default="standard")  # standard | asutp
+    calc_method = Column(String(20), nullable=False, default="standard")  # standard | asutp | survey
+    # Методика ценообразования: 'mu620' (СБЦП) | '707pr' (НЗ) | 'mrr' (Москва).
+    # Определяет режим экстраполяции в _match_row (миграция b8c9d0e1f2a3)
+    pricing_method = Column(String(10), nullable=False, default="mu620")
+    # Региональная привязка: NULL = федеральный; 'Москва и МО' — МРР
+    region = Column(String(50), nullable=True)
     # Per-book П/Р distribution (fraction of base price). NULL → МУ №620 п.1.4 default (0.4/0.6).
     # НЗ книги задают своё распределение (например НЗ-847 табл.2.3: П=0.6, Р=0.4).
     pd_pct = Column(Numeric(4, 3), nullable=True)
