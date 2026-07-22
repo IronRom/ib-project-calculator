@@ -36,10 +36,14 @@ def _auto_table_config(
       coeff_key='{kind}_table'   → coeff_min = номер таблицы стоимости
       coeff_key='{kind}_cat_{n}' → row_range = строки категории/группы ('пп.8-15')
       coeff_key='{kind}_base'    → coeff_min: 1 = камеральные+лабораторные (default),
-                                   2 = полевые(×К1)+лабораторные+камеральные
+                                   2 = полевые(×К1)+лабораторные+камеральные,
+                                   3 = только камеральные (НЗ-281 табл.65:
+                                       «при общей стоимости камеральных работ»,
+                                       прим.2 — программа не учитывается)
 
     Returns (table_num, (lo_row, hi_row) | None, base_mode) where base_mode is
-    'nonfield' | 'all'; table_num is None when not configured (auto-item skipped).
+    'nonfield' | 'all' | 'kameral'; table_num is None when not configured
+    (auto-item skipped).
     """
     rep = (
         db.query(BookCondition)
@@ -77,8 +81,8 @@ def _auto_table_config(
         )
         .first()
     )
-    base_mode = "all" if (base_rec and base_rec.coeff_min is not None
-                          and int(base_rec.coeff_min) == 2) else "nonfield"
+    base_code = int(base_rec.coeff_min) if (base_rec and base_rec.coeff_min is not None) else 1
+    base_mode = {2: "all", 3: "kameral"}.get(base_code, "nonfield")
     return table_num, rng, base_mode
 
 
@@ -274,10 +278,11 @@ def calculate_igi(
         index_val, idx_period, idx_just = _get_survey_index(db, price_base_year)
 
         # Bases for auto-items (техотчёт, программа):
-        #   nonfield_total_base — lab + kameral по показателям затрат
-        #   field_pz_base       — полевые × К1 (без ДЗ/зимы/К2/индекса) — для книг,
-        #                         где X отчёта/программы = полевые + камеральные
-        nonfield_total_base = 0.0
+        #   lab_base / kameral_base — лабораторные и камеральные по показателям затрат
+        #   field_pz_base           — полевые × К1 (без ДЗ/зимы/К2/индекса) — для книг,
+        #                             где X отчёта/программы = полевые + камеральные
+        lab_base = 0.0
+        kameral_base = 0.0
         field_pz_base = 0.0
 
         items = [it for it in survey.get("items", []) if not it.get("deleted")]
@@ -312,9 +317,11 @@ def calculate_igi(
                 effective_k1 = k1  # not used, but keep variable consistent
                 cost = base * index_val
                 coeff_note = ""
-                if work_cat in ("lab", "kameral"):
-                    # Accumulate for Table 65 (technical report X parameter)
-                    nonfield_total_base += base
+                # Accumulate for Table 65 (technical report X parameter)
+                if work_cat == "lab":
+                    lab_base += base
+                elif work_cat == "kameral":
+                    kameral_base += base
             else:
                 errors.append(f"ИГИ: неизвестная work_category '{work_cat}'")
                 continue
@@ -371,7 +378,12 @@ def calculate_igi(
             )
             if auto_table is None:
                 continue
-            base_x = nonfield_total_base + (field_pz_base if base_mode == "all" else 0.0)
+            if base_mode == "kameral":
+                base_x = kameral_base
+            elif base_mode == "all":
+                base_x = lab_base + kameral_base + field_pz_base
+            else:  # 'nonfield'
+                base_x = lab_base + kameral_base
             if base_x <= 0:
                 continue
             auto_cost_base = _interpolate_cost_table(
@@ -380,9 +392,10 @@ def calculate_igi(
             auto_cost = auto_cost_base * index_val
             if auto_cost <= 0:
                 continue
-            base_note = (
-                "полевые+камеральные" if base_mode == "all" else "лаб+камеральные"
-            )
+            base_note = {
+                "all": "полевые+лаб+камеральные",
+                "kameral": "камеральные",
+            }.get(base_mode, "лаб+камеральные")
             positions.append({
                 "num": len(positions) + 1,
                 "name": f"{label} ({survey_section.lower()}, кат.слож.{complexity_cat})",

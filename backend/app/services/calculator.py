@@ -142,6 +142,9 @@ class RowMatch:
     used_minimum: bool = False  # True when x_value was None and minimum row was used
     # 707/пр п.131 ф.8.4/8.5: X < Xмин/2 → цена на X=Xмин/2, умноженная на Кэ (≥0.1)
     extrap_scale: float = 1.0
+    # МУ №620 Прил.1: экстраполяция вверх допустима при X ≤ 2×X_гран;
+    # выше — X_задан в формуле ограничивается 2×X_гран (практика эксп. смет)
+    x_capped: Optional[float] = None
     # 707/пр п.133 ф.8.6–8.8: a-only таблица → цена интер/экстраполирована напрямую (тыс.руб)
     override_price_thous: Optional[float] = None
 
@@ -276,6 +279,15 @@ def _match_row(
 
         if maxes and x_eff > max(v for v, _ in maxes):
             bval, brow = max(maxes, key=lambda t: t[0])
+            if bval > 0 and x_eff > 2 * bval:
+                extrap_note = (
+                    f"экстраполяция (X={x_eff:.4g} > 2×X_гран={2 * bval:.4g}, "
+                    f"X_расч ограничен 2×X_гран — МУ №620 Прил.1)"
+                )
+                return RowMatch(
+                    brow, x_eff, True, bval, _join(note, extrap_note),
+                    x_capped=2 * bval,
+                )
             extrap_note = f"экстраполяция (X={x_eff:.4g} > {bval:.4g})"
             return RowMatch(brow, x_eff, True, bval, _join(note, extrap_note))
 
@@ -676,6 +688,23 @@ def _calculate_asutp_position(
             f"цена занижена. Проверьте формат кодов (Ф5→п.2.x, Ф9→п.6.x, Ф10→п.7.x)"
         )
 
+    # Стоимость АСУТП целиком определяется набором факторов. Если в ТЗ не было
+    # количественных данных (x_value_missing_reason проставлен экстрактором),
+    # факторы — предположение AI, и позиция может быть завышена в разы.
+    if warnings is not None and asutp_factors:
+        factors_str_w = ", ".join(f"{k}={v}" for k, v in sorted(asutp_factors.items()))
+        if entity.get("x_value") is None and entity.get("x_value_missing_reason"):
+            warnings.append(
+                f"{object_name}: факторы АСУТП ({factors_str_w}) назначены AI БЕЗ "
+                f"количественных данных в ТЗ (перечень операций/переменных/контуров "
+                f"отсутствует) — цена ОРИЕНТИРОВОЧНАЯ, подтвердите факторы вручную"
+            )
+        else:
+            warnings.append(
+                f"{object_name}: стоимость АСУТП определяется факторами "
+                f"({factors_str_w}) — сверьте их с перечнем функций автоматизации в ТЗ"
+            )
+
     base_year = book.price_base_year or 2001
     idx_rec = _get_quarterly_index(db, base_year)
     idx_value = float(idx_rec.index_value) if idx_rec else 1.0
@@ -801,9 +830,18 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
                 # 707/пр ф.8.4: цена считается в точке X=Xмин/2 (по ф.8.2), затем ×Кэ
                 x_calc = 0.4 * match.x_boundary + 0.6 * (0.5 * match.x_boundary)
             else:
-                x_calc = 0.4 * match.x_boundary + 0.6 * match.x_effective
+                x_for_extrap = match.x_capped if match.x_capped is not None else match.x_effective
+                x_calc = 0.4 * match.x_boundary + 0.6 * x_for_extrap
         else:
             x_calc = match.x_effective
+
+        if match.x_capped is not None:
+            warnings.append(
+                f"{object_name}: X={_fmt_ru(match.x_effective)} превышает верхнюю границу "
+                f"таблицы №{table_num} более чем вдвое — в формуле X ограничен "
+                f"2×X_гран={_fmt_ru(match.x_capped)} (МУ №620 Прил.1). Проверьте выбор "
+                f"таблицы/справочника или рассмотрите индивидуальный расчёт"
+            )
 
         # МУ №620 п.3.14: apply coefficients (resolve AI flag→actual DB value first)
         coefficients, dropped_coeffs = _resolve_coeff_values(
@@ -879,6 +917,11 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             if missing_hint:
                 justification += f"; для точного расчёта: {missing_hint}"
             justification += "]"
+            warnings.append(
+                f"{object_name}: X отсутствует в ТЗ — подставлен минимум таблицы "
+                f"№{table_num} (X={_fmt_ru(match.x_effective)} {row_unit}), цена УСЛОВНАЯ"
+                + (f". {missing_hint}" if missing_hint else "")
+            )
 
         # ── Formula (расчёт стоимости) ────────────────────────────────────────
         a_rub, b_rub = a * 1000, b * 1000
