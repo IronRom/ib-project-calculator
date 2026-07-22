@@ -38,49 +38,64 @@ def _parse_pdf(path: str) -> str:
 
 
 def _parse_pdf_vision(path: str) -> str:
-    """Extract text from a scanned PDF via Claude Vision (page by page)."""
+    """Extract text from a scanned PDF via OpenRouter vision (page by page).
+
+    Переведён с anthropic client на OpenRouter (chat/completions c image_url,
+    data-URI) — ключ Anthropic пуст и не пополняется (решение 22.07.2026).
+    """
+    import httpx
     from pdf2image import convert_from_path
-    import anthropic
     from app.config import settings
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     images = convert_from_path(path, dpi=150, fmt="jpeg")
     texts = []
 
-    for i, img in enumerate(images):
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        img_b64 = base64.standard_b64encode(buf.getvalue()).decode()
+    with httpx.Client(timeout=180) as http:
+        for i, img in enumerate(images):
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            img_b64 = base64.standard_b64encode(buf.getvalue()).decode()
 
-        resp = client.messages.create(
-            temperature=0,
-            model=settings.extraction_model,
-            max_tokens=2048,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": img_b64,
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "Извлеки весь текст с этой страницы документа точно как написано. "
-                            "Верни только текст, без пояснений и форматирования."
-                        ),
-                    },
-                ],
-            }],
-        )
-        text = resp.content[0].text.strip()
-        if text:
-            texts.append(text)
-        logger.debug("Vision OCR page %d: %d chars", i + 1, len(text))
+            resp = http.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.openrouter_api_key}",
+                    "HTTP-Referer": "https://ib-pir-calculator.ru",
+                    "X-Title": "IB PIR Calculator",
+                },
+                json={
+                    "model": settings.ocr_model,
+                    "max_tokens": 4096,
+                    "temperature": 0,
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{img_b64}",
+                                },
+                            },
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Извлеки весь текст с этой страницы документа точно как написано. "
+                                    "Верни только текст, без пояснений и форматирования."
+                                ),
+                            },
+                        ],
+                    }],
+                },
+            )
+            if not resp.is_success:
+                raise ValueError(
+                    f"OpenRouter OCR {resp.status_code} (стр. {i + 1}): {resp.text[:200]}"
+                )
+            data = resp.json()
+            text = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+            if text:
+                texts.append(text)
+            logger.debug("Vision OCR page %d: %d chars", i + 1, len(text))
 
     return "\n\n".join(texts)
 

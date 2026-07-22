@@ -65,7 +65,7 @@ async def stream_extraction(
         raise HTTPException(status_code=404, detail="Расчёт не найден")
 
     # Eagerly load everything before the generator — session closes when streaming starts
-    file_paths = [f.file_path for f in project.files]
+    file_infos = [(f.id, f.file_path, f.extracted_text) for f in project.files]
     project_db_id = project.id
     calc_db_id = calc.id
     openrouter_model = model  # capture for closure
@@ -76,7 +76,24 @@ async def stream_extraction(
             yield _sse("progress", {"step": 1, "total": 3, "message": "Извлечение текста из файлов…"})
             await asyncio.sleep(0.1)
 
-            combined_text = parse_project_files(file_paths)
+            # Кэш распарсенного текста в project_files.extracted_text —
+            # vision-OCR сканов дорог и долог, повторять его на каждом
+            # прогоне экстракции нельзя.
+            from app.models import ProjectFile as _PF
+            parts: list[str] = []
+            for f_id, f_path, f_cached in file_infos:
+                if f_cached and f_cached.strip():
+                    parts.append(f_cached)
+                    continue
+                text = parse_project_files([f_path])
+                parts.append(text)
+                if text.strip() and not text.startswith("[Ошибка"):
+                    with SessionLocal() as cache_db:
+                        rec = cache_db.query(_PF).filter(_PF.id == f_id).first()
+                        if rec:
+                            rec.extracted_text = text
+                            cache_db.commit()
+            combined_text = "\n\n---\n\n".join(p for p in parts if p.strip())
 
             provider_label = f"OpenRouter ({openrouter_model})" if openrouter_model else "Claude claude-sonnet-4-6"
             yield _sse("progress", {"step": 2, "total": 3, "message": f"AI-анализ технического задания… ({provider_label})"})
