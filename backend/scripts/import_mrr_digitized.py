@@ -172,6 +172,20 @@ def import_book(db, json_path, code, name, calc_method, log):
             ))
             n_cond += 1
             continue
+        # примечания к таблице → условия (Pass 2 видит их через conditions-контекст)
+        for note in (t.get("notes") or []):
+            coeffs = note.get("coeffs") or []
+            uniq = sorted(set(coeffs))
+            db.add(BookCondition(
+                book_version_id=book.id, table_num=tn,
+                condition_short=f"Прим. к табл.{t['id']}: {note['text'][:180]}",
+                condition_text_full=note["text"][:4000],
+                effect_type="multiplier_range" if uniq else "flag",
+                coeff_min=uniq[0] if len(uniq) == 1 else None,
+                coeff_max=uniq[0] if len(uniq) == 1 else None,
+            ))
+            n_cond += 1
+
         if not t["rows"]:
             continue
 
@@ -272,9 +286,18 @@ def import_book(db, json_path, code, name, calc_method, log):
 
 
 def main():
+    import os
     db = SessionLocal()
     log = []
-    for jf, code, name, method in BOOKS:
+    books = list(BOOKS)
+    manifest = "/app/scripts/mrr_digitized/manifest.json"
+    if os.path.exists(manifest):
+        seen = {b[1] for b in books}
+        for m in json.load(open(manifest)):
+            if m["code"] not in seen:
+                books.append((m["json"], m["code"], m["name"], m.get("method", "standard")))
+    for jf, code, name, method in books:
+        path = f"/app/scripts/{jf}" if not jf.startswith("mrr_digitized/") or True else jf
         import_book(db, f"/app/scripts/{jf}", code, name, method, log)
 
     # survey-индекс МКЭ к базе 2000 (для igi_calculator)

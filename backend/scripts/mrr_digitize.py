@@ -17,6 +17,9 @@ import pdfplumber
 
 RE_TABLE = re.compile(r"^Таблица\s+(\d+(?:\.\d+){0,3}[аб]?)\s*$")
 RE_CONT = re.compile(r"^Продолжение\s+таблицы\s+(\d+(?:\.\d+){0,3}[аб]?)", re.I)
+RE_NOTE_START = re.compile(r"^Примечани[ея]")
+# «с коэффициентом 1,2», «коэффициента 0,6», «К=1,3», «Ксл=0,9»
+RE_COEFF = re.compile(r"(?:коэффициент(?:ом|а|у)?\s+|К\s*=\s*)(\d+[.,]\d+)")
 
 
 def _cell(s):
@@ -79,11 +82,54 @@ def parse_grid(raw):
     return labels, data_rows
 
 
+def collect_notes(pdf):
+    """Примечания к таблицам: блок «Примечание(я): …» после таблицы N
+    принадлежит N. Возвращает {table_id: [строки примечаний]}."""
+    notes = {}
+    current_table = None
+    in_note = False
+    buf = []
+
+    def flush():
+        nonlocal buf, in_note
+        if current_table and buf:
+            notes.setdefault(current_table, []).extend(buf)
+        buf = []
+        in_note = False
+
+    for page in pdf.pages:
+        text = page.extract_text() or ""
+        for ln in (l.strip() for l in text.split("\n")):
+            m = RE_TABLE.match(ln)
+            if m:
+                flush()
+                current_table = m.group(1)
+                continue
+            if RE_CONT.match(ln):
+                continue
+            if RE_NOTE_START.match(ln):
+                flush()
+                in_note = True
+                buf = [ln]
+                continue
+            if in_note:
+                # конец примечаний: новый крупный заголовок/раздел
+                if re.match(r"^\d+\.\d*\s*[А-ЯA-Z]{2,}|^[А-ЯЁ\s]{12,}$", ln) and not ln.startswith("-"):
+                    flush()
+                elif not ln:
+                    continue
+                else:
+                    buf.append(ln)
+    flush()
+    return notes
+
+
 def parse_pdf(path):
     pdf = pdfplumber.open(path)
     tables = {}
     order = []
     current_for_cont = None
+    notes_by_table = collect_notes(pdf)
 
     for page in pdf.pages:
         text = page.extract_text() or ""
@@ -199,7 +245,8 @@ def parse_pdf(path):
                 })
             if rows:
                 out.append({"id": tid, "title": t["title"], "labels": ["а", "в"],
-                            "fmt": "ab_dense", "rows": rows})
+                            "fmt": "ab_dense", "rows": rows,
+                            "notes": _split_notes(notes_by_table.get(tid))})
             else:
                 skipped.append({"id": tid, "title": t["title"]})
             continue
@@ -243,7 +290,8 @@ def parse_pdf(path):
                 "vals": {labels[ci] or f"col{ci}": v for ci, v in vals.items()},
             })
         if rows:
-            out.append({"id": tid, "title": t["title"], "labels": labels, "rows": rows})
+            out.append({"id": tid, "title": t["title"], "labels": labels, "rows": rows,
+                        "notes": _split_notes(notes_by_table.get(tid))})
             continue
         # Нормативные таблицы-формулы («3679+2,4% от стоимости свыше…»):
         # чисел нет, но есть проценты/формулы — сохраняем текстом
@@ -260,10 +308,29 @@ def parse_pdf(path):
                 })
         if len(text_rows) >= 2:
             out.append({"id": tid, "title": t["title"], "labels": labels,
-                        "rows": [], "text_rows": text_rows})
+                        "rows": [], "text_rows": text_rows,
+                        "notes": _split_notes(notes_by_table.get(tid))})
         else:
             skipped.append({"id": tid, "title": t["title"]})
     return out, skipped
+
+
+def _split_notes(lines):
+    """Склеенные строки примечаний → пункты [{'text', 'coeffs': [1.2, ...]}]."""
+    if not lines:
+        return []
+    text = " ".join(lines)
+    text = re.sub(r"^Примечани[ея]:?\s*", "", text)
+    # пункты вида «1. … 2. …»
+    parts = re.split(r"(?<=[.;])\s+(?=\d{1,2}\.\s)", text)
+    items = []
+    for part in parts:
+        part = part.strip()
+        if len(part) < 8:
+            continue
+        coeffs = [float(c.replace(",", ".")) for c in RE_COEFF.findall(part)]
+        items.append({"text": part[:1200], "coeffs": coeffs})
+    return items
 
 
 def main():
