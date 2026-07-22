@@ -40,12 +40,14 @@ def audit(book_code: str, tolerance: float = 0.5) -> list[str]:
         for (tnum, rnum, unit), grp in groups.items():
             grp = sorted(grp, key=lambda r: float(r.x_min if r.x_min is not None else 0))
 
-            # 2) magnitude: b contribution vs a
+            # 2) magnitude: b contribution vs a. Порог ×2000 — легитимные площадные
+            # таблицы (га, км) дают ×200–700; ошибка десятичной запятой в b даёт
+            # ×100 000+ (например b=580610000 вместо 580.61).
             for r in grp:
                 if r.a is None or r.b is None or r.x_max is None:
                     continue
                 a, b, xmax = float(r.a), float(r.b), float(r.x_max)
-                if a > 0 and b * xmax > a * 200:
+                if a > 0 and b * xmax > a * 2000:
                     problems.append(
                         f"[магнитуда] табл.{tnum} {rnum} ({unit}): b×Xmax = {b * xmax:,.0f} "
                         f"при a = {a:,.0f} (×{b * xmax / a:,.0f}) — проверь десятичную запятую в b"
