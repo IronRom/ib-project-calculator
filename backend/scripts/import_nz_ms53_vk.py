@@ -3,7 +3,8 @@ Import НЗ-2025-МС53-ВК (Приказ Минстроя № 53/пр от 03.
 «Нормативные затраты на проектирование объектов водоснабжения, водоотведения и водоочистки»
 
 Key details:
-- Base year: 01.01.2024, values in тыс.руб → multiply by 1000 on import
+- Base year: 01.01.2024, values stored in тыс.руб AS-IS (system convention:
+  reference_rows хранит тыс.руб, calculate() умножает на 1000)
 - Tables named 3.1 – 3.17 → store table_num as integer (3.14 → 14)
 - ПД=40%, РД=60% (same as our STAGE_SPLITS system)
 - Standard a+b×X formula
@@ -83,7 +84,10 @@ CUSTOM_PROMPT = """Ты извлекаешь данные из страницы 
 
 ПРАВИЛА a и b:
 - Значения в тыс.руб — возвращай КАК ЕСТЬ (без умножения)
-- Запятые → точки, пробелы убирай: 3 757,979 → 3757.979
+- ВНИМАНИЕ К ДЕСЯТИЧНЫМ ЗАПЯТЫМ: запятая — десятичный разделитель, пробел — разделитель тысяч.
+  "3 757,979" → 3757.979;  "580,61" → 580.61 (НЕ 58061 и НЕ 580610);  "65,69" → 65.69
+  Параметр «б» почти всегда МЕНЬШЕ параметра «а» той же строки — если получилось наоборот
+  на порядки, перепроверь позицию запятой.
 - Прочерк или пусто → null
 
 Если на странице нет таблиц 3.1–3.17 с параметрами a и b → rows: [].
@@ -93,31 +97,34 @@ CUSTOM_PROMPT = """Ты извлекаешь данные из страницы 
 def run():
     db = SessionLocal()
     try:
-        # Remove existing
-        existing = db.query(ReferenceBook).filter(ReferenceBook.code == BOOK_CODE).first()
-        if existing:
-            logger.info(f"Removing existing {BOOK_CODE} id={existing.id}")
-            db.query(ReferenceRow).filter(ReferenceRow.book_version_id == existing.id).update({'object_type_id': None})
+        # Reuse existing book record (keeps id → hints/conditions/pd_pct survive);
+        # only rows and object types are wiped and re-imported.
+        book = db.query(ReferenceBook).filter(ReferenceBook.code == BOOK_CODE).first()
+        if book:
+            logger.info(f"Reusing existing {BOOK_CODE} id={book.id} — clearing rows/types")
+            db.query(ReferenceRow).filter(ReferenceRow.book_version_id == book.id).update({'object_type_id': None})
             db.flush()
-            db.query(BookObjectType).filter(BookObjectType.book_version_id == existing.id).delete()
-            db.query(ReferenceRow).filter(ReferenceRow.book_version_id == existing.id).delete()
-            db.delete(existing)
+            db.query(BookObjectType).filter(BookObjectType.book_version_id == book.id).delete()
+            db.query(ReferenceRow).filter(ReferenceRow.book_version_id == book.id).delete()
+            book.parse_prompt = CUSTOM_PROMPT
+            book.pdf_path = PDF_PATH
+            book.price_base_year = BASE_YEAR
             db.commit()
-
-        book = ReferenceBook(
-            code=BOOK_CODE,
-            official_name=BOOK_NAME,
-            version=1,
-            status='requires_validation',
-            is_active=False,
-            price_base_year=BASE_YEAR,
-            parse_prompt=CUSTOM_PROMPT,
-            pdf_path=PDF_PATH,
-        )
-        db.add(book)
-        db.commit()
-        db.refresh(book)
-        logger.info(f"Created book id={book.id}")
+        else:
+            book = ReferenceBook(
+                code=BOOK_CODE,
+                official_name=BOOK_NAME,
+                version=1,
+                status='requires_validation',
+                is_active=False,
+                price_base_year=BASE_YEAR,
+                parse_prompt=CUSTOM_PROMPT,
+                pdf_path=PDF_PATH,
+            )
+            db.add(book)
+            db.commit()
+            db.refresh(book)
+            logger.info(f"Created book id={book.id}")
 
         logger.info("Parsing PDF (52 pages)...")
         def on_progress(page, total, msg):
@@ -146,8 +153,8 @@ def run():
                 x_min=r.get('x_min'),
                 x_max=r.get('x_max'),
                 x_unit=r.get('x_unit'),
-                a=float(a_raw) * 1000 if a_raw is not None else None,
-                b=float(b_raw) * 1000 if b_raw is not None else None,
+                a=float(a_raw) if a_raw is not None else None,   # тыс.руб as-is
+                b=float(b_raw) if b_raw is not None else None,   # тыс.руб as-is
                 notes=r.get('notes'),
             )
             db.add(row)
@@ -172,12 +179,12 @@ def run():
         # Spot-check Кашин rows
         logger.info("\n--- Spot-check Кашин rows ---")
         # НЗ-2024-МС53-ВК-3.17-006: АБК м³ от 3000 до 6000 → table=17, row=п.6
-        # expected from Кашин: a=365, b=1.014 → in rubles: a=365000, b=1014
+        # expected from Кашин (тыс.руб): a=365, b=1.014
         # НЗ-2024-МС53-ВК-3.14-001: резервуар м³ от 30 до 2000 → table=14, row=п.1
-        # expected from Кашин: a=137.2, b=0.323 → in rubles: a=137200, b=323
+        # expected from Кашин (тыс.руб): a=137.2, b=0.323
         checks = [
-            (17, 'п.6', 365000, 1014, 'АБК 3000-6000 м³'),
-            (14, 'п.1', 137200, 323, 'Резервуар 30-2000 м³'),
+            (17, 'п.6', 365.0, 1.014, 'АБК 3000-6000 м³'),
+            (14, 'п.1', 137.2, 0.323, 'Резервуар 30-2000 м³'),
         ]
         all_ok = True
         for tnum, rnum, exp_a, exp_b, label in checks:
@@ -191,8 +198,8 @@ def run():
                 rows_t = db.query(ReferenceRow).filter_by(book_version_id=book.id, table_num=tnum).all()
                 logger.info(f"    Table {tnum} has {len(rows_t)} rows: {[x.row_num for x in rows_t[:10]]}")
                 continue
-            a_ok = r.a is not None and abs(float(r.a) - exp_a) < 100
-            b_ok = r.b is not None and abs(float(r.b) - exp_b) < 1
+            a_ok = r.a is not None and abs(float(r.a) - exp_a) < 0.1
+            b_ok = r.b is not None and abs(float(r.b) - exp_b) < 0.001
             status = 'OK' if (a_ok and b_ok) else 'MISMATCH'
             logger.info(f"  {status} Table {tnum} {rnum} ({label}): a={r.a} b={r.b} | expected a≈{exp_a} b≈{exp_b}")
             if status != 'OK':
