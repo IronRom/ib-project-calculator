@@ -86,6 +86,13 @@ Pass 3  _build_resolve_x_context() → AI заполняет null x_value (targe
 
 `ANTHROPIC_API_KEY` — в `.env`, не в коде.
 
+> **AI-провайдер: OpenRouter, НЕ Anthropic API** (решение от 22.07.2026 — ключ
+> Anthropic пуст и не пополняется). Экстракция ТЗ — `extract_entities_openrouter()`
+> (модель через параметр `?model=` у /stream). Ещё НЕ переведены на OpenRouter
+> (захардкожен anthropic client, использовать нельзя до перевода):
+> `reference_parser.py` (vision-парсер справочников), `document_parser._parse_pdf_vision`
+> (OCR сканов), `correct_and_compute` (calculations.py).
+
 ### Calculation engine
 
 `backend/app/services/calculator.py`
