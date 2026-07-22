@@ -107,7 +107,18 @@ def parse_range(text):
 
 def table_num_of(tid):
     s = tid.replace("а", ".91").replace("б", ".92")
-    return int(s.replace(".", ""))
+    if "-" in s:
+        # СЦ-87: «Таблица 1-1» → 1×1000+1 = 1001; «72-15» → 72015
+        parts = s.split("-")
+        try:
+            return int(parts[0].replace(".", "")) * 1000 + int(parts[1].replace(".", ""))
+        except ValueError:
+            pass
+    try:
+        return int(s.replace(".", ""))
+    except ValueError:
+        # прочие нечисловые id — стабильный хэш в диапазоне 900000+
+        return 900000 + abs(hash(tid)) % 90000
 
 
 def is_ab_table(labels):
@@ -130,21 +141,28 @@ def price_columns(rows, threshold=25.0):
     return {lb for lb, vs in stats.items() if vs and median(vs) > threshold}
 
 
-def import_book(db, json_path, code, name, calc_method, log):
+def import_book(db, json_path, code, name, calc_method, log,
+                base_year=2000, active=True, pricing="mrr"):
     data = json.load(open(json_path))
     old = db.query(ReferenceBook).filter(ReferenceBook.code == code).first()
     if old:
+        if not (old.notes or "").startswith("Оцифровано"):
+            log.append(f"{code}: КУРАТОРСКАЯ книга в БД — пропуск (не затираю)")
+            return None
         for model in (ReferenceRow, BookObjectType, BookCondition):
             db.query(model).filter(model.book_version_id == old.id).delete()
         db.delete(old)
         db.flush()
 
     book = ReferenceBook(
-        code=code, official_name=name, version=1, status="consistent",
-        is_active=True, price_base_year=2000, calc_method=calc_method,
+        code=code, official_name=name, version=1,
+        status="consistent" if active else "requires_validation",
+        is_active=active, price_base_year=base_year, calc_method=calc_method,
+        pricing_method=pricing,
         uploaded_at=datetime.now(timezone.utc),
-        notes="Оцифровано из текстового слоя PDF 22.07.2026 (mrr_digitize.py). "
-              "Пересчёт — Кпер МКЭ к базе 01.01.2000.",
+        notes=f"Оцифровано из текстового слоя PDF (конвейер, без AI). "
+              f"База цен {base_year}. "
+              + ("" if active else "НЕАКТИВНА: требует проверки/индексов перед использованием."),
     )
     db.add(book)
     db.flush()
@@ -297,8 +315,25 @@ def main():
             if m["code"] not in seen:
                 books.append((m["json"], m["code"], m["name"], m.get("method", "standard")))
     for jf, code, name, method in books:
-        path = f"/app/scripts/{jf}" if not jf.startswith("mrr_digitized/") or True else jf
         import_book(db, f"/app/scripts/{jf}", code, name, method, log)
+
+    sbcm = "/app/scripts/mrr_digitized/sbc_manifest.json"
+    if os.path.exists(sbcm):
+        for m in json.load(open(sbcm)):
+            jp = f"/app/scripts/{m['json']}"
+            if not os.path.exists(jp):
+                log.append(f"{m['code']}: json отсутствует — пропуск")
+                continue
+            data = json.load(open(jp))
+            fmts = [t.get("fmt") for t in data.get("tables", [])]
+            ws_draft = fmts and fmts.count("ws") > len(fmts) / 2
+            active = m.get("active", False) and not ws_draft
+            import_book(db, jp, m["code"], m["name"],
+                        m.get("method", "standard"), log,
+                        base_year=m.get("base_year", 2001),
+                        active=active, pricing="mu620")
+            if ws_draft:
+                log.append(f"{m['code']}: ws-черновик → НЕАКТИВНА (выверить)")
 
     # survey-индекс МКЭ к базе 2000 (для igi_calculator)
     for wt in ("survey",):

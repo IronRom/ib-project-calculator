@@ -1,0 +1,34 @@
+{
+ "source": "/app/scripts/_probe_pdfs/sbts-na-proektnye-raboty-dlya-stroitelstva-_avtomobilnye-dorogi-obshchego-polzovaniya_.pdf",
+ "tables": [
+  {
+   "id": "2",
+   "title": "Раздел 2 (whitespace-разбор)",
+   "labels": [
+    "а",
+    "в"
+   ],
+   "fmt": "ws",
+   "rows": [
+    {
+     "num": "2",
+     "name": "Базовая цена проектирования автомобильных дорог и транспортных развязок :: Территория застроена",
+     "unit": "",
+     "vals": {
+      "а": [
+       2.0
+      ],
+      "в": [
+       3.0
+      ],
+      "k0": [
+       3.0
+      ]
+     }
+    }
+   ],
+   "notes": []
+  }
+ ],
+ "skipped": []
+}

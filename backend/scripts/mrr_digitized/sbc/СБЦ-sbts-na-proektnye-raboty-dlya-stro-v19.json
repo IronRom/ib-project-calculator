@@ -1,0 +1,31 @@
+{
+ "source": "/app/scripts/_probe_pdfs/sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-ugolnoy-promyshlennosti_.pdf",
+ "tables": [
+  {
+   "id": "1",
+   "title": "Раздел 1 (whitespace-разбор)",
+   "labels": [
+    "а",
+    "в"
+   ],
+   "fmt": "ws",
+   "rows": [
+    {
+     "num": "",
+     "name": "Распределение базовой цены проектной документации по стадиям проектирования :: процент от базовой цены Проект (П)",
+     "unit": "",
+     "vals": {
+      "а": [
+       70.0
+      ],
+      "в": [
+       30.0
+      ]
+     }
+    }
+   ],
+   "notes": []
+  }
+ ],
+ "skipped": []
+}

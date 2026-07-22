@@ -1,0 +1,31 @@
+{
+ "source": "/app/scripts/_probe_pdfs/sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-mashinostroitelnoy-promyshlennosti_.pdf",
+ "tables": [
+  {
+   "id": "1",
+   "title": "Раздел 1 (whitespace-разбор)",
+   "labels": [
+    "а",
+    "в"
+   ],
+   "fmt": "ws",
+   "rows": [
+    {
+     "num": "",
+     "name": "Базовая цена проектных работ определяется путем умножения величины общей :: р",
+     "unit": "",
+     "vals": {
+      "а": [
+       0.0
+      ],
+      "в": [
+       0.0
+      ]
+     }
+    }
+   ],
+   "notes": []
+  }
+ ],
+ "skipped": []
+}

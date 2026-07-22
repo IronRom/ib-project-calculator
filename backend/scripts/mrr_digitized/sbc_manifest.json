@@ -1,0 +1,882 @@
+[
+ {
+  "pdf": "enir_obshchie_polozheniya.pdf",
+  "code": "СБЦ-enir_obshchie_polozheniya",
+  "name": "ГОСУДАРСТВЕННЫЙ СТРОИТЕЛЬНЫЙ КОМИТЕТ СССР Единые нормы и расценки на строительные, монтажные и ремонтно-строительные работы Общая часть Информационные данные УТВЕРЖДЕНЫ постановлением Государственного строительного комит",
+  "json": "mrr_digitized/sbc/СБЦ-enir_obshchie_polozheniya.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "method"
+ },
+ {
+  "pdf": "gsn-sbts_tsm_25.03.2015.pdf",
+  "code": "СБЦ-gsn-sbts_tsm_25.03.2015",
+  "name": "Приложение № 3 к приказу Министерства строительства и жилищно-коммунального хозяйства Российской Федерации « 4 » июня 2015 г. № 406/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ «СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В СТРОИТ",
+  "json": "mrr_digitized/sbc/СБЦ-gsn-sbts_tsm_25.03.2015.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "gsn_metodika_razrabotki-sbts_19.03.15.pdf",
+  "code": "СБЦ-gsn_metodika_razrabotki-sbts_19.03",
+  "name": "Приложение № 1 к приказу Министерства строительства и жилищно-коммунального хозяйства Российской Федерации « 4 » июня 2015 г. № 406/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ «МЕТОДИЧЕСКИЕ УКАЗАНИЯ О ПОРЯДКЕ РАЗРАБОТКИ ГОСУДАРС",
+  "json": "mrr_digitized/sbc/СБЦ-gsn_metodika_razrabotki-sbts_19.03.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "other"
+ },
+ {
+  "pdf": "gsn_sbts_ptkhn_31.03.2015.pdf",
+  "code": "СБЦ-gsn_sbts_ptkhn_31.03.2015",
+  "name": "Приложение к приказу Министерства строительства и жилищно-коммунального хозяйства Российской Федерации « 4 » июня 2015 г. № 406/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ «СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В СТРОИТЕЛЬС",
+  "json": "mrr_digitized/sbc/СБЦ-gsn_sbts_ptkhn_31.03.2015.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "prilozhenie-270pr.pdf",
+  "code": "СБЦ-prilozhenie-270pr",
+  "name": "Приложение к приказу Министерства строительства и жилищно-коммунального хозяйства Российской Федерации «25» апреля 2016 г. № 270/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ «СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ОБМЕРНЫЕ РАБОТЫ И ОБСЛЕДОВАН",
+  "json": "mrr_digitized/sbc/СБЦ-prilozhenie-270pr.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "razdel_2._neftyanaya_promyshlennost.pdf",
+  "code": "СЦ-razdel_2._neftyanaya_promyshlennos",
+  "name": "МИНИСТЕРСТВО НЕФТЯНОЙ ПРОМЫШЛЕННОСТИ СССР (Миннефтепром СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 2 НЕФТЯНАЯ ПРОМЫШЛЕННОСТЬ (С ИЗМЕНЕНИЯМИ И ДОПОЛНЕНИЯМИ) Утвержден Министерством нефтяной промышленно",
+  "json": "mrr_digitized/sbc/СЦ-razdel_2._neftyanaya_promyshlennos.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "razdel_9._khimicheskaya_promyshlennost.pdf",
+  "code": "СЦ-razdel_9._khimicheskaya_promyshlen",
+  "name": "МИНИСТЕРСТВО ХИМИЧЕСКОЙ ПРОМЫШЛЕННОСТИ СССР (Минхимпром СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 9 ХИМИЧЕСКАЯ ПРОМЫШЛЕННОСТЬ Утвержден Министерском химической промышленности СССР (протокол от 27.03.",
+  "json": "mrr_digitized/sbc/СЦ-razdel_9._khimicheskaya_promyshlen.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbornik_tsen_na_izyskatelskie_raboty_dlya_kapitalnogo_stroitelstva.pdf",
+  "code": "СЦ-sbornik_tsen_na_izyskatelskie_rabo",
+  "name": "Утвержден и введен в действие Постановлением Госстроя СССР от 16 июля 1981 г. N 121 СБОРНИК ЦЕН НА ИЗЫСКАТЕЛЬСКИЕ РАБОТЫ ДЛЯ КАПИТАЛЬНОГО СТРОИТЕЛЬСТВА Список изменяющих документов (в ред. Дополнений, утв. Постановлением",
+  "json": "mrr_digitized/sbc/СЦ-sbornik_tsen_na_izyskatelskie_rabo.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbornik_tsen_na_proektnye_raboty_dlya_stroitelstva_elektroenergetika.pdf",
+  "code": "СЦ-sbornik_tsen_na_proektnye_raboty_d",
+  "name": "Утвержден Протоколом Минэнерго СССР, Минатомэнерго СССР от 16 марта 1987 г. N 8 СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 1 ЭЛЕКТРОЭНЕРГЕТИКА Список изменяющих документов (в ред. Изменений и дополнений, ут",
+  "json": "mrr_digitized/sbc/СЦ-sbornik_tsen_na_proektnye_raboty_d.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbornik_tsen_na_proektnye_raboty_dlya_stroitelstva_energeticheskoe_mashinostroenie.pdf",
+  "code": "СЦ-sbornik_tsen_na_proektnye_raboty_d-v2",
+  "name": "Утвержден Министерством энергетического машиностроения СССР 9 апреля 1987 года по согласованию с Госстроем СССР (Письмо АЧ-645-6/5 от 11 февраля 1987 г.) МИНИСТЕРСТВО ЭНЕРГЕТИЧЕСКОГО МАШИНОСТРОЕНИЯ СССР (МИНЭНЕРГОМАШ ССС",
+  "json": "mrr_digitized/sbc/СЦ-sbornik_tsen_na_proektnye_raboty_d-v2.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts-na-inzhenerenye-izyskaniya-dlya-stroitelstva-_lesokhozyaystvennye-izyskaniya_.pdf",
+  "code": "СБЦ-sbts-na-inzhenerenye-izyskaniya-dl",
+  "name": "Рекомендован к применению Письмом Росстроя от 24 мая 2006 г. N СК-1976/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ЛЕСОХОЗЯЙСТВЕННЫЕ ИЗЫСКАНИЯ (цены приведены к базисному уровню на 01.01.2001) Разработан ФГУП \"Росгипролес\" (Санталин В.",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-inzhenerenye-izyskaniya-dl.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-inzhenerno_geologicheskie-i-inzhenerno_ekologicheskie-izyskaniya-dlya-stroitelstva.pdf",
+  "code": "СБЦ-sbts-na-inzhenerno_geologicheskie-",
+  "name": "Одобрен Письмом Госстроя РФ от 22 июня 1998 г. N 9-4/84 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ИНЖЕНЕРНО-ГЕОЛОГИЧЕСКИЕ И ИНЖЕНЕРНО-ЭКОЛОГИЧЕСКИЕ ИЗЫСКАНИЯ ДЛЯ СТРОИТЕЛЬСТВА Разработан Производственным и научно-исследовательским инсти",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-inzhenerno_geologicheskie-.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-inzhenernye-izyskaniya-dlya-stroitelstva-_inzhenerno_geodezicheskie-izyskaniya-pri-stroitelstve-i-ekspluatatsii-zdaniy-i-sooruzheniy_-.pdf",
+  "code": "СБЦ-sbts-na-inzhenernye-izyskaniya-dly",
+  "name": "Рекомендован Письмом Росстроя от 24 мая 2006 г. N СК-1976/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ИНЖЕНЕРНЫЕ ИЗЫСКАНИЯ ДЛЯ СТРОИТЕЛЬСТВА ИНЖЕНЕРНО-ГЕОДЕЗИЧЕСКИЕ ИЗЫСКАНИЯ ПРИ СТРОИТЕЛЬСТВЕ И ЭКСПЛУАТАЦИИ ЗДАНИЙ И СООРУЖЕНИЙ (ЦЕНЫ П",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-inzhenernye-izyskaniya-dly.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-inzhenernye-izyskaniya-dlya-stroitelstva-_inzhenerno_geodezicheskie-izyskaniya_.pdf",
+  "code": "СБЦ-sbts-na-inzhenernye-izyskaniya-dly-v2",
+  "name": "Утвержден и введен в действие Постановлением Госстроя РФ от 23 декабря 2003 г. N 213 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ИНЖЕНЕРНЫЕ ИЗЫСКАНИЯ ДЛЯ СТРОИТЕЛЬСТВА ИНЖЕНЕРНО-ГЕОДЕЗИЧЕСКИЕ ИЗЫСКАНИЯ (цены приведены к базисному уровню н",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-inzhenernye-izyskaniya-dly-v2.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-inzhenernye-izyskaniya-dlya-stroitelstva-_inzhenerno_gidrograficheskie-raboty.-inzhenerno_gidrometeorologicheskie-izyskaniya-na-rekakh_.pdf",
+  "code": "СБЦ-sbts-na-inzhenernye-izyskaniya-dly-v3",
+  "name": "Одобрен Письмом Госстроя РФ от 26 сентября 2000 г. N 5-11/91 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ИНЖЕНЕРНЫЕ ИЗЫСКАНИЯ ДЛЯ СТРОИТЕЛЬСТВА ИНЖЕНЕРНО-ГИДРОГРАФИЧЕСКИЕ РАБОТЫ. ИНЖЕНЕРНО-ГИДРОМЕТЕОРОЛОГИЧЕСКИЕ ИЗЫСКАНИЯ НА РЕКАХ (цены п",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-inzhenernye-izyskaniya-dly-v3.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-obmernye-raboty-i-obsledovaniya-zdaniy-i-sooruzheniy.pdf",
+  "code": "СБЦ-sbts-na-obmernye-raboty-i-obsledov",
+  "name": "Одобрен и рекомендован Письмом Госстроя РФ от 16 июня 1998 года N 9-10-17/33 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ОБМЕРНЫЕ РАБОТЫ И ОБСЛЕДОВАНИЯ ЗДАНИЙ И СООРУЖЕНИЙ Введен в действие с 1 сентября 1998 года Справочник базовых цен на",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-obmernye-raboty-i-obsledov.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_avtomobilnye-dorogi-obshchego-polzovaniya_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro",
+  "name": "Рекомендован к применению Письмом Росстроя от 9 октября 2007 г. N СК-3743/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА АВТОМОБИЛЬНЫЕ ДОРОГИ ОБЩЕГО ПОЛЬЗОВАНИЯ Разработан ОАО \"ЦЕНТРИНВЕСТпроект\" совмест",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_metropoliteny_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v2",
+  "name": "Принят и введен в действие Письмом Росстроя от 7 мая 2004 г. N АП-2642/10 ФЕДЕРАЛЬНОЕ АГЕНТСТВО ПО СТРОИТЕЛЬСТВУ И ЖИЛИЩНО-КОММУНАЛЬНОМУ ХОЗЯЙСТВУ СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА МЕТРОПОЛИТЕН",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v2.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-gazovoy-promyshlennosti_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v3",
+  "name": "Одобрен Письмом Госстроя РФ от 7 декабря 1999 г. N Н3-4298/10 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ ГАЗОВОЙ ПРОМЫШЛЕННОСТИ Справочник базовых цен на проектные работы для строительства \"Объе",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v3.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-lesnogo-khozyaystva_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v4",
+  "name": "Принят и введен в действие Письмом Росстроя от 12 января 2006 г. N СК-31/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ ЛЕСНОГО ХОЗЯЙСТВА Разработан ФГУП \"ЦЕНТРИНВЕСТпроект\" (Пулико В.И., Туренск",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v4.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-mashinostroitelnoy-promyshlennosti_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v5",
+  "name": "Утвержден Постановлением Минстроя РФ от 11 августа 1995 г. N 18-82 Согласован с Комитетом РФ по машиностроению 16 февраля 1995 г. N 8/3-11-30 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ МАШИНОСТР",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v5.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-meliorativnogo-i-vodokhozyaystvennogo-stroitelstva_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v6",
+  "name": "Принят и введен в действие Письмом Росстроя от 7 мая 2004 г. N АП-2642/10 ФЕДЕРАЛЬНОЕ АГЕНТСТВО ПО СТРОИТЕЛЬСТВУ И ЖИЛИЩНО-КОММУНАЛЬНОМУ ХОЗЯЙСТВУ СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ МЕЛИ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v6.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-morskogo-transporta_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v7",
+  "name": "Принят и введен в действие Письмом Росстроя от 7 мая 2004 г. N АП-2642/10 ФЕДЕРАЛЬНОЕ АГЕНТСТВО ПО СТРОИТЕЛЬСТВУ И ЖИЛИЩНО-КОММУНАЛЬНОМУ ХОЗЯЙСТВУ СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ МОРС",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v7.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-mukomolno_krupyanoy-i-kombikormovoy-promyshlennosti_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v8",
+  "name": "Принят и введен в действие Письмом Росстроя от 8 июня 2004 г. N АП-3030/06 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ МУКОМОЛЬНО-КРУПЯНОЙ И КОМБИКОРМОВОЙ ПРОМЫШЛЕННОСТИ Разработан ФГУП \"ЦЕНТРИНВ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v8.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-neftedobyvayushchey-promyshlennosti_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v9",
+  "name": "Принят и введен в действие Письмом Росстроя от 12 января 2006 г. N СК-31/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ НЕФТЕДОБЫВАЮЩЕЙ ПРОМЫШЛЕННОСТИ Разработан ФГУП \"ЦЕНТРИНВЕСТпроект\" (Пулико",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v9.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-poligraficheskoy-promyshlennosti_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v10",
+  "name": "Утвержден Постановлением Минстроя РФ от 8 февраля 1995 г. N 18-13 По согласованию Госкомпечати РФ (от 25.11.1994 г. N 09-2825/21) СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ ПОЛИГРАФИЧЕСКОЙ ПРОМЫ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v10.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-proizvodstva-azotnykh-udobreniy-i-produktov-organicheskogo-sinteza.-kislorodnaya-podotrasl.-metanolnaya-podotrasl_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v11",
+  "name": "Рекомендован к применению Письмом Росстроя от 18 марта 2008 г. N ВБ-750/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ ПРОИЗВОДСТВА АЗОТНЫХ УДОБРЕНИЙ И ПРОДУКТОВ ОРГАНИЧЕСКОГО СИНТЕЗА КИСЛОРОДНАЯ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v11.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-proizvodstva-mineralnykh-udobreniy-i-drugikh-khimicheskikh-proizvodstv_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v12",
+  "name": "Принят и введен в действие Письмом Росстроя от 12 января 2006 г. N СК-31/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ ПРОИЗВОДСТВА МИНЕРАЛЬНЫХ УДОБРЕНИЙ И ДРУГИХ ХИМИЧЕСКИХ ПРОИЗВОДСТВ Разработ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v12.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-promyshlennosti-khimicheskikh-volokon_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v13",
+  "name": "Принят и введен в действие Письмом Росстроя от 7 мая 2004 г. N АП-2642/10 ФЕДЕРАЛЬНОЕ АГЕНТСТВО ПО СТРОИТЕЛЬСТВУ И ЖИЛИЩНО-КОММУНАЛЬНОМУ ХОЗЯЙСТВУ СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ ПРОМ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v13.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-promyshlennosti-sinteticheskikh-smol-i-plasticheskikh-mass_-steklovolokna-i-stekloplastikov.-proizvodstva-plastmassovykh-izdeliy_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v14",
+  "name": "Принят и введен в действие Письмом Росстроя от 12 января 2006 г. N СК-31/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ ПРОМЫШЛЕННОСТИ СИНТЕТИЧЕСКИХ СМОЛ И ПЛАСТИЧЕСКИХ МАСС. ОБЪЕКТЫ ПРОМЫШЛЕННОС",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v14.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-promyshlennosti-stroitelnykh-materialov_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v15",
+  "name": "Утвержден Постановлением Госстроя РФ от 23 июня 1997 г. N 18-18 Согласован с Российским акционерным обществом по развитию промышленности строительных материалов и предметов домоустройства АО \"Росстром\" от 9 октября 1996",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v15.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-rechnogo-transporta_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v16",
+  "name": "Принят и введен в действие Письмом Росстроя от 7 мая 2004 г. N АП-2642/10 ФЕДЕРАЛЬНОЕ АГЕНТСТВО ПО СТРОИТЕЛЬСТВУ И ЖИЛИЩНО-КОММУНАЛЬНОМУ ХОЗЯЙСТВУ СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ РЕЧН",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v16.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-sudostroitelnoy-promyshlennosti_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v17",
+  "name": "Принят и введен в действие Письмом Росстроя от 7 мая 2004 г. N АП-2642/10 ФЕДЕРАЛЬНОЕ АГЕНТСТВО ПО СТРОИТЕЛЬСТВУ И ЖИЛИЩНО-КОММУНАЛЬНОМУ ХОЗЯЙСТВУ СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ СУДО",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v17.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-svyazi_.pdf",
+  "code": "СБЦП 81-2001-02",
+  "name": "Утвержден Приказом Минрегионом РФ от 28 мая 2010 г. N 260 (Зарегистрирован в Минюсте РФ 14 сентября 2010 г. N 18439) ГОСУДАРСТВЕННЫЕ СМЕТНЫЕ НОРМАТИВЫ РОССИЙСКОЙ ФЕДЕРАЦИИ СБЦП 81-02-02-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРО",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-02.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-tsellyulozno_bumazhnoy-promyshlennosti_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v18",
+  "name": "Утвержден Постановлением Минстроя РФ от 7 марта 1996 г. N 18-19 Согласован с \"Рослеспромом\" от 04.10.1995 N 2-21-2209 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ ЦЕЛЛЮЛОЗНО-БУМАЖНОЙ ПРОМЫШЛЕННОСТ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v18.json",
+  "method": "standard",
+  "base_year": 1995,
+  "active": false,
+  "typ": "sbc95"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-ugolnoy-promyshlennosti_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v19",
+  "name": "Принят и введен в действие Письмом Росстроя от 12 января 2006 г. N СК-31/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ УГОЛЬНОЙ ПРОМЫШЛЕННОСТИ Разработан ФГУП \"ЦЕНТРИНВЕСТпроект\" (Пулико В.И., Т",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v19.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_obekty-zhilishchno_grazhdanskogo-stroitelstva_.pdf",
+  "code": "СБЦП 81-2001-03",
+  "name": "Утвержден Приказом Минрегиона РФ от 28 мая 2010 г. N 260 (Зарегистрирован в Минюсте РФ 14 сентября 2010 г. N 18439) ГОСУДАРСТВЕННЫЕ СМЕТНЫЕ НОРМАТИВЫ РОССИЙСКОЙ ФЕДЕРАЦИИ СБЦП 81-02-03-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕ",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-03.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_predpriyatiya-agropromyshlennogo-kompleksa_-torgovli-i-obshchestvennogo-pitaniya_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v20",
+  "name": "Приложение № 3 к приказу Министерства строительства и жилищно-коммунального хозяйства Российской Федерации «____»________2014 г. №________ ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ «СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В СТ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v20.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_predpriyatiya-avtomobilnogo-transporta_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v21",
+  "name": "Принят и введен в действие Письмом Росстроя от 12.01.2006 г. N СК-31/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ПРЕДПРИЯТИЯ АВТОМОБИЛЬНОГО ТРАНСПОРТА (ЭКСПЛУАТАЦИЯ, ТЕХНИЧЕСКИЙ СЕРВИС И ХРАНЕНИЕ АВТО",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v21.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_promyshlennye-pechi_-sushila_-dymovye-i-ventilyatsionnye-truby_-konstruktsii-teplovoy-izolyatsii-i-antikorrozionnoy-zashchity_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v22",
+  "name": "Принят и введен в действие Письмом Росстроя от 7 мая 2004 г. N АП-2642/10 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ПРОМЫШЛЕННЫЕ ПЕЧИ, СУШИЛА, ДЫМОВЫЕ И ВЕНТИЛЯЦИОННЫЕ ТРУБЫ, КОНСТРУКЦИИ ТЕПЛОВОЙ ИЗОЛЯ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v22.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_sistemy-protivopozharnoy-i-okhrannoy-zashchity_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-dlya-stro-v23",
+  "name": "Одобрен и рекомендован Письмом Госстроя РФ от 28 сентября 1999 г. N Н3-3287/10 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА СИСТЕМЫ ПРОТИВОПОЖАРНОЙ И ОХРАННОЙ ЗАЩИТЫ Справочник базовых цен на проектные ра",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-dlya-stro-v23.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-dlya-stroitelstva-_territorialnoe-planirovanie-i-planirovka-territoriy_.pdf",
+  "code": "СБЦП 81-2001-01",
+  "name": "Утвержден Приказом Минрегиона РФ от 28 мая 2010 г. N 260 (Зарегистрирован в Минюсте РФ 14 сентября 2010 г. N 18439) ГОСУДАРСТВЕННЫЕ СМЕТНЫЕ НОРМАТИВЫ РОССИЙСКОЙ ФЕДЕРАЦИИ СБЦП 81-02-01-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕ",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-01.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_gazooborudovanie-i-gazosnabzhenie-promyshlennykh-predpriyatiy_-zdaniy-i-sooruzheniy_.pdf",
+  "code": "СБЦП 81-2001-14",
+  "name": "Внесен Приказом Министерства строительства и жилищно-коммунального хозяйства Российской Федерации от 27 февраля 2015 г. N 140/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ СБЦП 81-02-14-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБ",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-14.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_iskusstvennye-sooruzheniya_.pdf",
+  "code": "СБЦП 81-2001-16",
+  "name": "Внесен Приказом Министерства строительства и жилищно-коммунального хозяйства Российской Федерации от 27 февраля 2015 г. N 140/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ СБЦП 81-02-16-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБ",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-16.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_kommunalnye-inzhenernye-seti-i-sooruzheniya_.pdf",
+  "code": "СБЦП 81-2001-07",
+  "name": "Утвержден Приказом Министерства регионального развития Российской Федерации от 24 мая 2012 г. N 213 ГОСУДАРСТВЕННЫЕ СМЕТНЫЕ НОРМАТИВЫ РОССИЙСКОЙ ФЕДЕРАЦИИ СБЦП 81-02-07-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В С",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-07.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_obekty-atomnoy-energetiki_.pdf",
+  "code": "СБЦП 81-2001-06",
+  "name": "Утвержден Приказом Министерства регионального развития Российской Федерации от 14 мая 2012 г. N 198 ГОСУДАРСТВЕННЫЕ СМЕТНЫЕ НОРМАТИВЫ РОССИЙСКОЙ ФЕДЕРАЦИИ СБЦП 81-02-06-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В С",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-06.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_obekty-aviatsionnoy-promyshlennosti_.pdf",
+  "code": "СБЦП 81-2001-04",
+  "name": "Утвержден Приказом Минрегиона РФ от 29 ноября 2011 г. N 547 ГОСУДАРСТВЕННЫЕ СМЕТНЫЕ НОРМАТИВЫ РОССИЙСКОЙ ФЕДЕРАЦИИ СБЦП 81-02-04-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В СТРОИТЕЛЬСТВЕ СБЦП 81-2001-04 ОБЪЕКТЫ АВИ",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-04.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_obekty-chernoy-metallurgii_.pdf",
+  "code": "СБЦП 81-2001-18",
+  "name": "Внесен Приказом Министерства строительства и жилищно-коммунального хозяйства Российской Федерации от 27 февраля 2015 г. N 140/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ СБЦП 81-02-18-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБ",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-18.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_obekty-grazhdanskoy-aviatsii_.pdf",
+  "code": "СБЦП 81-2001-12",
+  "name": "Внесен Приказом Министерства строительства и жилищно-коммунального хозяйства Российской Федерации от 27 февраля 2015 г. N 140/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ СБЦП 81-02-12-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБ",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-12.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_obekty-ispolzovaniya-atomnoy-energii_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-v-stroite",
+  "name": "Утвержден Приказом Министерства строительства и жилищно-коммунального хозяйства Российской Федерации от 9 сентября 2015 г. N 648/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ \"СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В СТРОИТЕЛЬ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-v-stroite.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_obekty-magistralnogo-truboprovodnogo-transporta-nefti_.pdf",
+  "code": "СБЦП 81-2001-08",
+  "name": "Утвержден Приказом Министерства регионального развития Российской Федерации от 18 июня 2012 г. N 229 ГОСУДАРСТВЕННЫЕ СМЕТНЫЕ НОРМАТИВЫ РОССИЙСКОЙ ФЕДЕРАЦИИ СБЦП 81-02-08-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-08.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_obekty-ministerstva-oborony-rossiyskoy-federatsii_.pdf",
+  "code": "СБЦ-sbts-na-proektnye-raboty-v-stroite-v2",
+  "name": "Приложение 2 к приказу Министерства строительства и жилищно-коммунальному хозяйству Российской Федерации «____»________2014 г. №________ ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ «СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В СТРО",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-proektnye-raboty-v-stroite-v2.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_obekty-neftepererabatyvayushchey-i-neftekhimicheskoy-promyshlennosti_.pdf",
+  "code": "СБЦП 81-2001-13",
+  "name": "Внесен Приказом Министерства строительства и жилищно-коммунального хозяйства Российской Федерации от 27 февраля 2015 г. N 140/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ СБЦП 81-02-13-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБ",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-13.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_obekty-vodosnabzheniya-i-kanalizatsii_.pdf",
+  "code": "СБЦП 81-2001-17",
+  "name": "Внесен Приказом Министерства строительства и жилищно-коммунального хозяйства Российской Федерации от 27 февраля 2015 г. N 140/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ СБЦП 81-02-17-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБ",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-17.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-proektnye-raboty-v-stroitelstve-_zaglublennye-sooruzheniya-i-konstruktsii_-vodoponizhenie_-protivoopolznevye-sooruzheniya-i-meropriyatiya_.pdf",
+  "code": "СБЦП 81-2001-15",
+  "name": "Внесен Приказом Министерства строительства и жилищно-коммунального хозяйства Российской Федерации от 27 февраля 2015 г. N 140/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ СБЦП 81-02-15-2001 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБ",
+  "json": "mrr_digitized/sbc/СБЦП 81-2001-15.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": true,
+  "typ": "sbcp2001"
+ },
+ {
+  "pdf": "sbts-na-razrabotku-konstruktorskoy-dokumentatsii-oborudovaniya-individualnogo-izgotovleniya.pdf",
+  "code": "СБЦ-sbts-na-razrabotku-konstruktorskoy",
+  "name": "Одобрен Письмом Госстроя РФ от 16 июня 1998 года N 9-10-17/33 Согласован с Комитетом РФ по машиностроению 14 октября 1996 г. N 8/3-4-271 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА РАЗРАБОТКУ КОНСТРУКТОРСКОЙ ДОКУМЕНТАЦИИ ОБОРУДОВАНИЯ ИНДИ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-na-razrabotku-konstruktorskoy.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts-zhd_07-07-2014.pdf",
+  "code": "СБЦ-sbts-zhd_07-07-2014",
+  "name": "Приложение к приказу Министерства строительства и жилищно-коммунального хозяйства Российской Федерации «30» сентября 2014 г. № 590/пр ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ «СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В СТРОИТЕ",
+  "json": "mrr_digitized/sbc/СБЦ-sbts-zhd_07-07-2014.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_avtomobilnaya_i_podshipnikovaya_promyshlennost.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro",
+  "name": "МИНИСТЕРСТВО АВТОМОБИЛЬНОЙ ПРОМЫШЛЕННОСТИ СССР (Минавтопром СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 18 АВТОМОБИЛЬНАЯ И ПОДШИПНИКОВАЯ ПРОМЫШЛЕННОСТЬ (с изменениями и дополнениями) Утвержден Министер",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_elektrotekhnicheskaya_promyshlennost.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v2",
+  "name": "МИНИСТЕРСТВО ЭЛЕКТРОТЕХНИЧЕСКОЙ ПРОМЫШЛЕННОСТИ СССР (Минэлектротехпром СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 13 ЭЛЕКТРОТЕХНИЧЕСКАЯ ПРОМЫШЛЕННОСТЬ Утвержден Министерством электротехнической промыш",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v2.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_gazoochistnye_i_pyleulavlivayushchie_sooruzheniya.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v3",
+  "name": "МИНИСТЕРСТВО ХИМИЧЕСКОГО И НЕФТЯНОГО МАШИНОСТРОЕНИЯ СССР (МинхиммашСССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 61 ГАЗООЧИСТНЫЕ И ПЫЛЕУЛАВЛИВАЮЩИЕ СООРУЖЕНИЯ (с изменениями и дополнениями) Утвержден Мин",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v3.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_khimicheskoe_i_neftyanoe_mashinostroenie.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v4",
+  "name": "МИНИСТЕРСТВО ХИМИЧЕСКОГО И НЕФТЯНОГО МАШИНОСТРОЕНИЯ СССР (Минхиммаш СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 14 ХИМИЧЕСКОЕ И НЕФТЯНОЕ МАШИНОСТРОЕНИЕ (с изменениями и дополнениями) Утвержден министер",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v4.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_legkaya_i_tekstilnaya_promyshlennost.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v5",
+  "name": "МИНИСТЕРСТВО ЛЕГКОЙ ПРОМЫШЛЕННОСТИ СССР (Минлегпром СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 28 ЛЕГКАЯ И ТЕКСТИЛЬНАЯ ПРОМЫШЛЕННОСТЬ (с изменениями и дополнениями) Утвержден Министерством легкой пром",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v5.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_lesnaya_i_derevoobrabatyvayushchaya_tsellyulozno_bumazhnaya_promyshlennost.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v6",
+  "name": "МИНИСТЕРСТВО ЛЕСНОЙ, ЦЕЛЛЮЛОЗНО-БУМАЖНОЙ И ДЕРЕВООБРАБАТЫВАЮЩЕЙ ПРОМЫШЛЕННОСТИ СССР (Минлесбумпром СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 26 ЛЕСНАЯ И ДЕРЕВООБРАБАТЫВАЮЩАЯ, ЦЕЛЛЮЛОЗНО-БУМАЖНАЯ ПРОМ",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v6.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_lesnoe_khozyaystvo.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v7",
+  "name": "ГОСУДАРСТВЕННЫЙ КОМИТЕТ СССР ПО ЛЕСНОМУ ХОЗЯЙСТВУ (Гослесхоз СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 33 ЛЕСНОЕ ХОЗЯЙСТВО (с изменениями и дополнениями) Утвержден Государственным комитетом СССР по л",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v7.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_mashinostroenie_dlya_zhivotnovodstva_i_kormoproizvodstva.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v8",
+  "name": "МИНИСТЕРСТВО МАШИНОСТРОЕНИЯ ДЛЯ ЖИВОТНОВОДСТВА И КОРМОПРОИЗВОДСТВА СССР (Минживмаш СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 20 МАШИНОСТРОЕНИЕ ДЛЯ ЖИВОТНОВОДСТВА И КОРМОПРОИЗВОДСТВА (с изменениями и",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v8.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_meditsinskaya_i_mikrobiologicheskaya_promyshlennost.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v9",
+  "name": "МИНИСТЕРСТВО МЕДИЦИНСКОЙ И МИКРОБИОЛОГИЧЕСКОЙ ПРОМЫШЛЕННОСТИ СССР (МИНМЕДБИОПРОМ СССР) С Б О Р Н И К ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 30 МЕДИЦИНСКАЯ И МИКРОБИОЛОГИЧЕСКАЯ ПРОМЫШЛЕННОСТЬ (с изменениями и до",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v9.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_mestnaya_promyshlennost.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v10",
+  "name": "МИНИСТЕРСТВО МЕСТНОЙ ПРОМЫШЛЕННОСТИ РСФСР (МИНМЕСТПРОМ РСФСР) С Б О Р Н И К ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 58 МЕСТНАЯ ПРОМЫШЛЕННОСТЬ (С ИЗМЕНЕНИЯМИ И ДОПОЛНЕНИЯМИ) Утвержден Министерством местной промыш",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v10.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_obekty_obustroystva_geologii.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v11",
+  "name": "МИНИСТЕРСТВО ГЕОЛОГИИ СССР (МИНГЕО СССР) С Б О Р Н И К ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 41 ОБЪЕКТЫ ОБУСТРОЙСТВА ГЕОЛОГИИ (С ИЗМЕНЕНИЯМИ И ДОПОЛНЕНИЯМИ) Утвержден Министерством геологии СССР (приказ от 06.",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v11.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_predpriyatiya_materialno_tekhnicheskogo_snabzheniya_i_sbyta.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v12",
+  "name": "ГОСУДАРСТВЕННЫЙ КОМИТЕТ СССР ПО МАТЕРИАЛЬНО-ТЕХНИЧЕСКОМУ СНАБЖЕНИЮ (Госснаб СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 43 ПРЕДПРИЯТИЯ МАТЕРИАЛЬНО-ТЕХНИЧЕСКОГО СНАБЖЕНИЯ И СБЫТА (с изменениями и дополн",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v12.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_priborostroenie.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v13",
+  "name": "МИНИСТЕРСТВО ПРИБОРОСТРОЕНИЯ, СРЕДСТВ АВТОМАТИЗАЦИИ И СИСТЕМ УПРАВЛЕНИЯ СССР (Минприбор СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 17 ПРИБОРОСТРОЕНИЕ (с изменениями и дополнениями) Утвержден Министерс",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v13.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_proizvodstvo_mineralnykh_udobreniy.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v14",
+  "name": "МИНИСТЕРСТВО ПО ПРОИЗВОДСТВУ МИНЕРАЛЬНЫХ УДОБРЕНИЙ (Минудобрений) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 10 ПРОИЗВОДСТВО МИНЕРАЛЬНЫХ УДОБРЕНИЙ (с изменениями и дополнениями) Утвержден Министерством по п",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v14.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_proizvodstvo_produktsii_obshchemashinostroitelnogo_primeneniya.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v15",
+  "name": "МИНИСТЕРСТВО СТАНКОСТРОИТЕЛЬНОЙ И ИНСТРУМЕНТАЛЬНОЙ ПРОМЫШЛЕННОСТИ СССР (Минстанкопром СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 16 ПРОИЗВОДСТВО ПРОДУКЦИИ ОБЩЕМАШИНОСТРОИТЕЛЬНОГО ПРИМЕНЕНИЯ (с изменен",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v15.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_remontnye_predpriyatiya_ugolnoy_promyshlennosti.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v16",
+  "name": "МИНИСТЕРСТВО УГОЛЬНОЙ ПРОМЫШЛЕННОСТИ СССР (МИНУГЛЕПРОМ СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 23 РЕМОНТНЫЕ ПРЕДПРИЯТИЯ УГОЛЬНОЙ ПРОМЫШЛЕННОСТИ (с изменениями и дополнениями) Утвержден Министерство",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v16.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_rybnaya_promyshlennost.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v17",
+  "name": "МИНИСТЕРСТВО РЫБНОГО ХОЗЯЙСТВА СССР (МИНРЫБХОЗ СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 29 РЫБНАЯ ПРОМЫШЛЕННОСТЬ (с изменениями и дополнениями) Утвержден Министерством рыбного хозяйства СССР (приказ",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v17.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_stankostroitelnaya_i_instrumentalnaya_promyshlennost.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v18",
+  "name": "МИНИСТЕРСТВО СТАНКОСТРОИТЕЛЬНОЙ И ИНСТРУМЕНТАЛЬНОЙ ПРОМЫШЛЕННОСТИ СССР (Минстанкопром СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 15 СТАНКОСТРОИТЕЛЬНАЯ И ИНСТРУМЕНТАЛЬНАЯ ПРОМЫШЛЕННОСТЬ (с изменениями",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v18.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_stroitelnoe_dorozhnoe_i_kommunalnoe_mashinostroenie.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v19",
+  "name": "МИНИСТЕРСТВО СТРОИТЕЛЬНОГО, ДОРОЖНОГО И КОММУНАЛЬНОГО МАШИНОСТРОЕНИЯ СССР (Минстройдормаш) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 21 СТРОИТЕЛЬНОЕ, ДОРОЖНОЕ И КОММУНАЛЬНОЕ МАШИНОСТРОЕНИЕ (с изменениями и",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v19.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_torfyanaya_promyshlennost.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v20",
+  "name": "МИНИСТЕРСТВО ТОПЛИВНОЙ ПРОМЫШЛЕННОСТИ РСФСР (Минтоппром РСФСР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 53 ТОРФЯНАЯ ПРОМЫШЛЕННОСТЬ (с изменениями и дополнениями) Утвержден Министерством топливной промышле",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v20.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_traktornoe_i_selskokhozyaystvennoe_mashinostroenie.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v21",
+  "name": "МИНИСТЕРСТВО ТРАКТОРНОГО И СЕЛЬСКОХОЗЯЙСТВЕННОГО МАШИНОСТРОЕНИЯ СССР (Минсельхозмаш) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 19 ТРАКТОРНОЕ И СЕЛЬСКОХОЗЯЙСТВЕННОЕ МАШИНОСТРОЕНИЕ (с изменениями и дополнени",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v21.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_tsvetnaya_metallurgiya.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v22",
+  "name": "МИНИСТЕРСТВО ЦВЕТНОЙ МЕТАЛЛУРГИИ СССР (Минцветмет СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 7 ЦВЕТНАЯ МЕТАЛЛУРГИЯ (с изменениями и дополнениями) Утвержден Минцветметом СССР (протокол от 16.03.87 № 25",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v22.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_tyazheloe_i_transportnoe_mashinostroenie.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v23",
+  "name": "МИНИСТЕРСТВО ТЯЖЕЛОГО, ЭНЕРГЕТИЧЕСКОГО И ТРАНСПОРТНОГО МАШИНОСТРОЕНИЯ СССР (Минтяжмаш СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 12 ТЯЖЕЛОЕ И ТРАНСПОРТНОЕ МАШИНОСТРОЕНИЕ Утвержден Министерством тяжело",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v23.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_zavody_po_remontu_podvizhnogo_sostava_strelochnye_i_elektrotekhnicheskie.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v24",
+  "name": "МИНИСТЕРСТВО ПУТЕЙ СООБЩЕНИЯ СССР (МПС СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 24 ЗАВОДЫ ПО РЕМОНТУ ПОДВИЖНОГО СОСТАВА, СТРЕЛОЧНЫЕ И ЭЛЕКТРОТЕХНИЧЕСКИЕ (с изменениями и дополнениями) Утвержден Мини",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v24.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_na_proektnye_raboty_dlya_stroitelstva_zavody_stroitelnykh_metallokonstruktsiy.pdf",
+  "code": "СЦ-sbts_na_proektnye_raboty_dlya_stro-v25",
+  "name": "ГОСУДАРСТВЕННЫЙ СТРОИТЕЛЬНЫЙ КОМИТЕТ СССР (ГОССТРОЙ СССР) СБОРНИК ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА РАЗДЕЛ 25 ЗАВОДЫ СТРОИТЕЛЬНЫХ МЕТАЛЛОКОНСТРУКЦИЙ (С ИЗМЕНЕНИЯМИ И ДОПОЛНЕНИЯМИ) Утвержден постановлением Госстро",
+  "json": "mrr_digitized/sbc/СЦ-sbts_na_proektnye_raboty_dlya_stro-v25.json",
+  "method": "standard",
+  "base_year": 1991,
+  "active": false,
+  "typ": "sc91"
+ },
+ {
+  "pdf": "sbts_normativy_podgotovki_tekh._dokumentatsii_dlya_kap._remonta_zdaniy_i_soo....pdf",
+  "code": "СБЦ-sbts_normativy_podgotovki_tekh._do",
+  "name": "СБЦП «Нормативы подготовки технической документации для капитального ремонта зданий и сооружений жилищно-гражданского назначения» 2012 г. ГОСУДАРСТВЕННЫЙ СМЕТНЫЙ НОРМАТИВ «СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ В СТР",
+  "json": "mrr_digitized/sbc/СБЦ-sbts_normativy_podgotovki_tekh._do.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "spravochnik_bazovykh_tsen_na_proektnye_raboty_dlya_stroitelstva_gorodskie_inzhenernye_sooruzheniya_i_kommunikatsii.pdf",
+  "code": "СБЦ-spravochnik_bazovykh_tsen_na_proek",
+  "name": "Рекомендован к применению Письмом Росстроя от 24 апреля 2008 г. N ВБ-1711/02 ФЕДЕРАЛЬНОЕ АГЕНТСТВО ПО СТРОИТЕЛЬСТВУ И ЖИЛИЩНО-КОММУНАЛЬНОМУ ХОЗЯЙСТВУ СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ГОРОДСКИЕ",
+  "json": "mrr_digitized/sbc/СБЦ-spravochnik_bazovykh_tsen_na_proek.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "spravochnik_bazovykh_tsen_na_proektnye_raboty_dlya_stroitelstva_inzhenerno_tekhnicheskie_meropriyatiya_grazhdanskoy_oborony.pdf",
+  "code": "СБЦ-spravochnik_bazovykh_tsen_na_proek-v2",
+  "name": "Принят и введен в действие Письмом Росстроя от 12 января 2006 г. N СК-31/02 СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ИНЖЕНЕРНО-ТЕХНИЧЕСКИЕ МЕРОПРИЯТИЯ ГРАЖДАНСКОЙ ОБОРОНЫ. МЕРОПРИЯТИЯ ПО ПРЕДУПРЕЖДЕНИ",
+  "json": "mrr_digitized/sbc/СБЦ-spravochnik_bazovykh_tsen_na_proek-v2.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "spravochnik_bazovykh_tsen_na_proektnye_raboty_dlya_stroitelstva_obekty_alyuminievoy_i_elektrodnoy_promyshlennosti.pdf",
+  "code": "СБЦ-spravochnik_bazovykh_tsen_na_proek-v3",
+  "name": "Принят и введен в действие Письмом Росстроя от 7 мая 2004 г. N АП-2642/10 ФЕДЕРАЛЬНОЕ АГЕНТСТВО ПО СТРОИТЕЛЬСТВУ И ЖИЛИЩНО-КОММУНАЛЬНОМУ ХОЗЯЙСТВУ СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ АЛЮМ",
+  "json": "mrr_digitized/sbc/СБЦ-spravochnik_bazovykh_tsen_na_proek-v3.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "spravochnik_bazovykh_tsen_na_proektnye_raboty_dlya_stroitelstva_obekty_energetiki.pdf",
+  "code": "СБЦ-spravochnik_bazovykh_tsen_na_proek-v4",
+  "name": "Утвержден Постановлением Минстроя РФ от 25 ноября 1996 г. N 18-82 Утвержден по согласованию с Минтопэнерго РФ (Письмо от 18 ноября 1996 г. N КВ-6572) СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ Э",
+  "json": "mrr_digitized/sbc/СБЦ-spravochnik_bazovykh_tsen_na_proek-v4.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ },
+ {
+  "pdf": "spravochnik_bazovykh_tsen_na_proektnye_raboty_dlya_stroitelstva_obekty_gornorudnoy_promyshlennosti.pdf",
+  "code": "СБЦ-spravochnik_bazovykh_tsen_na_proek-v5",
+  "name": "Принят и введен в действие Письмом Росстроя от 8 июня 2004 г. N АП-3030/06 ФЕДЕРАЛЬНОЕ АГЕНТСТВО ПО СТРОИТЕЛЬСТВУ И ЖИЛИЩНО-КОММУНАЛЬНОМУ ХОЗЯЙСТВУ СПРАВОЧНИК БАЗОВЫХ ЦЕН НА ПРОЕКТНЫЕ РАБОТЫ ДЛЯ СТРОИТЕЛЬСТВА ОБЪЕКТЫ ГОР",
+  "json": "mrr_digitized/sbc/СБЦ-spravochnik_bazovykh_tsen_na_proek-v5.json",
+  "method": "standard",
+  "base_year": 2001,
+  "active": false,
+  "typ": "sbc_unknown"
+ }
+]

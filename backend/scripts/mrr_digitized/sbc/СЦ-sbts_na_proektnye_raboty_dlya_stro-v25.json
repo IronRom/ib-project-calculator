@@ -1,0 +1,56 @@
+{
+ "source": "/app/scripts/_probe_pdfs/sbts_na_proektnye_raboty_dlya_stroitelstva_zavody_stroitelnykh_metallokonstruktsiy.pdf",
+ "tables": [
+  {
+   "id": "1",
+   "title": "Раздел 1 (whitespace-разбор)",
+   "labels": [
+    "а",
+    "в"
+   ],
+   "fmt": "ws",
+   "rows": [
+    {
+     "num": "",
+     "name": "Завод строительных стальных :: конструкций мощностью: от 20 до 50 1 тыс.",
+     "unit": "",
+     "vals": {
+      "а": [
+       206.1
+      ],
+      "в": [
+       3.71
+      ],
+      "k0": [
+       0.26
+      ],
+      "k1": [
+       1.06
+      ]
+     }
+    },
+    {
+     "num": "",
+     "name": "Завод легких :: металлоконструкций мощностью: от 20 до 40 “",
+     "unit": "",
+     "vals": {
+      "а": [
+       262.1
+      ],
+      "в": [
+       4.75
+      ],
+      "k0": [
+       0.26
+      ],
+      "k1": [
+       1.06
+      ]
+     }
+    }
+   ],
+   "notes": []
+  }
+ ],
+ "skipped": []
+}
