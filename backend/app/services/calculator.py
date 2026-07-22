@@ -118,6 +118,12 @@ _UNIT_ALIASES: dict[str, str] = {
     "квадратный метр":                 "м²",
     "гектар":                          "га",
     "гектаров":                        "га",
+    "километр":                        "км",
+    "метр":                            "м",
+    "погонный метр":                   "п.м",
+    "кубических метров / секунду":     "м³/с",
+    "кубических метров/секунду":       "м³/с",
+    "м3/с":                            "м³/с",
 }
 
 
@@ -144,11 +150,22 @@ class RowMatch:
 # Any unit NOT in this set is treated as a discrete count (штуки, ячейки, шкафы, etc.)
 # and is 1:1 equivalent to any other discrete unit.
 _PHYSICAL_UNITS: frozenset[str] = frozenset({
-    "м³/сут", "тыс. м³/сут", "м³/ч", "тыс. м³/ч",
+    "м³/сут", "тыс. м³/сут", "м³/ч", "тыс. м³/ч", "м³/с",
     "л/с", "т/сут", "т/г.", "тыс. т/г.", "км", "м", "п.м",
     "мвт", "квт", "гкал/ч", "мва", "ква",
     "м³", "тыс. м³", "га", "м²", "тыс. м²",
 })
+
+# Единица с «/» — это расход/интенсивность (физическая размерность), даже если её
+# нет в словарях: полные словоформы из НЗ («кубических метров / секунду») не должны
+# проваливаться в discrete-1:1 эквивалентность.
+def _looks_physical(u: str) -> bool:
+    ul = u.lower()
+    return (
+        ul in {p.lower() for p in _PHYSICAL_UNITS}
+        or "/" in ul
+        or any(w in ul for w in ("метр", "километр", "гектар", "тонн", "куб", "литр"))
+    )
 
 
 def _try_convert(x_value: float, from_unit: str, to_unit: str) -> Optional[float]:
@@ -166,10 +183,7 @@ def _try_convert(x_value: float, from_unit: str, to_unit: str) -> Optional[float
     if fn is not None:
         return fn(x_value)
     # Both units are discrete → 1:1 equivalence
-    all_physical_lower = {u.lower() for u in _PHYSICAL_UNITS} | {u.lower() for u in _UNIT_ALIASES}
-    from_phys = from_c.lower() in all_physical_lower
-    to_phys   = to_c.lower()   in all_physical_lower
-    if not from_phys and not to_phys:
+    if not _looks_physical(from_c) and not _looks_physical(to_c):
         return x_value
     return None
 

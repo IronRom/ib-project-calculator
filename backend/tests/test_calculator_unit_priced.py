@@ -86,3 +86,14 @@ def test_resolve_coeffs_found_not_dropped():
     assert dropped == []
     assert len(resolved) == 1
     assert resolved[0]["value"] == 1.2
+
+
+# ── Full word-form units must not fall into discrete 1:1 equivalence ─────────
+
+def test_full_wordform_units_not_discrete():
+    """«километр» → «кубических метров / секунду» must NOT convert 1:1."""
+    assert _try_convert(1.5, "километр", "кубических метров / секунду") is None
+
+
+def test_full_wordform_km_to_m():
+    assert _try_convert(1.5, "километр", "метр") == 1500.0
