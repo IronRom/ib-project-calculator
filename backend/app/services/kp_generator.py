@@ -160,6 +160,43 @@ def _add_run(para: Any, text: str, bold: bool = False, italic: bool = False,
     return run
 
 
+def _build_kp_lines(result: dict[str, Any]) -> list[tuple[str, float]]:
+    """Build КП table lines (name, cost_with_vat) from calculation positions.
+
+    Sums actual position costs by stage_label — respects per-book ПД/РД
+    distribution and per-entity section % overrides. Stage-embedded positions
+    (изыскания, АСУТП) are grouped by their section_name.
+    """
+    from collections import defaultdict
+
+    positions = result.get("positions", [])
+    vat_rate = (result.get("vat_rate") or 22) / 100
+
+    embedded_groups: dict[str, float] = defaultdict(float)
+    pd_cost = rd_cost = other_cost = 0.0
+    for p in positions:
+        c = float(p.get("cost", 0))
+        if p.get("_stage_embedded"):
+            embedded_groups[p.get("section_name") or "Инженерные изыскания"] += c
+        elif p.get("stage_label") == "ПД":
+            pd_cost += c
+        elif p.get("stage_label") == "РД":
+            rd_cost += c
+        else:
+            other_cost += c
+
+    lines: list[tuple[str, float]] = []
+    for label, scost in embedded_groups.items():
+        lines.append((label, scost * (1 + vat_rate)))
+    if pd_cost:
+        lines.append(("Разработка проектной документации", pd_cost * (1 + vat_rate)))
+    if rd_cost:
+        lines.append(("Разработка рабочей документации", rd_cost * (1 + vat_rate)))
+    if other_cost:
+        lines.append(("Проектно-изыскательские работы", other_cost * (1 + vat_rate)))
+    return lines
+
+
 # ── Word generator ────────────────────────────────────────────────────────────
 
 def generate_kp_word(
@@ -249,31 +286,7 @@ def generate_kp_word(
     doc.add_paragraph().paragraph_format.space_after = Pt(4)
 
     # ── Cost table ────────────────────────────────────────────────────────────
-    positions = result.get("positions", [])
-
-    # Survey positions are stage-embedded (_stage_embedded=True); group by section_name
-    from collections import defaultdict
-    survey_groups: dict[str, float] = defaultdict(float)
-    for p in positions:
-        if p.get("_stage_embedded"):
-            survey_groups[p.get("section_name", "Инженерные изыскания")] += float(p.get("cost", 0))
-    total_survey_cost = sum(survey_groups.values())
-    design_cost = cost_with_stage - total_survey_cost
-
-    lines: list[tuple[str, float]] = []
-    for label, scost in survey_groups.items():
-        lines.append((label, scost * (1 + vat_rate)))
-    if stage == "П+Р":
-        pd_cost = design_cost * 0.4 * (1 + vat_rate)
-        rd_cost = design_cost * 0.6 * (1 + vat_rate)
-        lines += [
-            ("Разработка проектной документации", pd_cost),
-            ("Разработка рабочей документации",   rd_cost),
-        ]
-    elif stage == "П":
-        lines.append(("Разработка проектной документации", design_cost * (1 + vat_rate)))
-    else:
-        lines.append(("Разработка рабочей документации", design_cost * (1 + vat_rate)))
+    lines = _build_kp_lines(result)
 
     table = doc.add_table(rows=0, cols=3)
     col_widths = [Cm(1.5), Cm(10.5), Cm(4.5)]
@@ -504,30 +517,7 @@ def generate_kp_pdf(
     story.append(Spacer(1, 0.5*cm))
 
     # ── Cost table ────────────────────────────────────────────────────────────
-    positions = result.get("positions", [])
-
-    from collections import defaultdict
-    survey_groups: dict[str, float] = defaultdict(float)
-    for p in positions:
-        if p.get("_stage_embedded"):
-            survey_groups[p.get("section_name", "Инженерные изыскания")] += float(p.get("cost", 0))
-    total_survey_cost = sum(survey_groups.values())
-    design_cost = cost_with_stage - total_survey_cost
-
-    lines: list[tuple[str, float]] = []
-    for label, scost in survey_groups.items():
-        lines.append((label, scost * (1 + vat_rate)))
-    if stage == "П+Р":
-        pd_cost = design_cost * 0.4 * (1 + vat_rate)
-        rd_cost = design_cost * 0.6 * (1 + vat_rate)
-        lines += [
-            ("Разработка проектной документации", pd_cost),
-            ("Разработка рабочей документации",   rd_cost),
-        ]
-    elif stage == "П":
-        lines.append(("Разработка проектной документации", design_cost * (1 + vat_rate)))
-    else:
-        lines.append(("Разработка рабочей документации", design_cost * (1 + vat_rate)))
+    lines = _build_kp_lines(result)
 
     col_w = [1.5*cm, 10.5*cm, 4.5*cm]
     th_style = style(align=TA_CENTER, size=11, bold=True)

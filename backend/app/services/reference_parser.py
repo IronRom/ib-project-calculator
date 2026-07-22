@@ -202,6 +202,7 @@ def parse_reference_pdf(
 
         try:
             resp = client.messages.create(
+                temperature=0,
                 model=settings.extraction_model,
                 max_tokens=4096,
                 messages=[

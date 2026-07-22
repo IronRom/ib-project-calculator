@@ -53,6 +53,7 @@ def _parse_pdf_vision(path: str) -> str:
         img_b64 = base64.standard_b64encode(buf.getvalue()).decode()
 
         resp = client.messages.create(
+            temperature=0,
             model=settings.extraction_model,
             max_tokens=2048,
             messages=[{

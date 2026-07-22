@@ -677,21 +677,59 @@ def _fill_sbts_codes(result: ExtractionResult, db, detected_codes: list[str]) ->
             entity.sbts_code = table_to_code[entity.sbts_table]
 
 
-def _build_resolve_x_context(result: ExtractionResult, tz_text: str, hints_ctx: str) -> str:
-    """Pass 3 context: entity list with null-x highlighted + hints + TZ."""
+def _build_resolve_x_context(
+    result: ExtractionResult, tz_text: str, hints_ctx: str, db=None
+) -> str:
+    """Pass 3 context: entity list with null-x highlighted + hints + TZ.
+
+    Includes the reference-table units per entity so the resolved X is given
+    in the book's units, not the TZ's.
+    """
     null_indices = [i for i, e in enumerate(result.entities) if e.x_value is None]
     if not null_indices:
         return ""
+
+    # (sbts_code, sbts_table) → units present in that table's rows
+    unit_map: dict[tuple[str, int], str] = {}
+    if db is not None:
+        from app.models import ReferenceRow
+        from app.services.calculator import _find_active_book
+        for e in result.entities:
+            if not e.sbts_table:
+                continue
+            key = (e.sbts_code or "", e.sbts_table)
+            if key in unit_map:
+                continue
+            book = _find_active_book(db, e.sbts_code or "")
+            if not book:
+                continue
+            units = sorted({
+                u for (u,) in db.query(ReferenceRow.x_unit)
+                .filter(
+                    ReferenceRow.book_version_id == book.id,
+                    ReferenceRow.table_num == e.sbts_table,
+                    ReferenceRow.x_unit.isnot(None),
+                )
+                .distinct()
+                .all()
+            })
+            if units:
+                unit_map[key] = ", ".join(units)
+
     lines = [
         "═══ УТОЧНЕНИЕ ПАРАМЕТРА X ═══\n",
         "Анализ ТЗ уже выполнен. Ниже — все позиции с текущими X.",
         "Для позиций «X=null» определи X из текста ТЗ или из параметров других позиций.",
+        "X указывай СТРОГО в единицах справочника (см. «ед. справочника» у позиции);",
+        "при необходимости конвертируй значение из единиц ТЗ.",
         "Если X не удаётся определить — оставь такие позиции без изменений.\n",
         "Позиции (индекс, таблица, наименование, X):",
     ]
     for i, e in enumerate(result.entities):
         x_str = f"{e.x_value} {e.x_unit}" if e.x_value is not None else "null ← ОПРЕДЕЛИТЬ"
-        lines.append(f"  [{i}] Таблица {e.sbts_table}: {e.object_name} | {x_str}")
+        unit_hint = unit_map.get((e.sbts_code or "", e.sbts_table or 0))
+        unit_str = f" | ед. справочника: {unit_hint}" if unit_hint else ""
+        lines.append(f"  [{i}] Таблица {e.sbts_table}: {e.object_name} | {x_str}{unit_str}")
     if hints_ctx:
         lines.append("\n" + hints_ctx)
     lines.append("\n═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text)
@@ -786,6 +824,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
                     "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
                 )
                 resp0a = client.messages.create(
+                    temperature=0,
                     model=settings.extraction_model,
                     max_tokens=400,
                     system=system_block,
@@ -807,6 +846,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
                     f"{book_list}"
                 )
                 resp0b = client.messages.create(
+                    temperature=0,
                     model=settings.extraction_model,
                     max_tokens=200,
                     system=system_block,
@@ -828,6 +868,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
     messages: list[dict] = [{"role": "user", "content": msg1_content}]
 
     resp1 = client.messages.create(
+        temperature=0,
         model=settings.extraction_model,
         max_tokens=4096,
         system=system_block,
@@ -883,6 +924,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
     ]
 
     resp2 = client.messages.create(
+        temperature=0,
         model=settings.extraction_model,
         max_tokens=2048,
         system=system_block,
@@ -897,9 +939,10 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
             break
 
     # ── Pass 3 (optional): resolve x_value=null ───────────────────────────────
-    resolve_ctx = _build_resolve_x_context(result, tz_text, hints_ctx)
+    resolve_ctx = _build_resolve_x_context(result, tz_text, hints_ctx, db=db)
     if resolve_ctx:
         resp3 = client.messages.create(
+            temperature=0,
             model=settings.extraction_model,
             max_tokens=1024,
             system=system_block,
@@ -941,6 +984,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
         payload = {
             "model": model_id,
             "max_tokens": max_tokens,
+            "temperature": 0,
             "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
             "tools": tools,
             # No tool_choice — let the model decide; avoids 404 on providers
@@ -964,6 +1008,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
         payload = {
             "model": model_id,
             "max_tokens": max_tokens,
+            "temperature": 0,
             "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
         }
         async with httpx.AsyncClient(timeout=60) as http:
@@ -1076,7 +1121,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
             pass  # truncated response — skip coefficients, return entities as-is
 
     # ── Pass 3 (optional): resolve x_value=null ───────────────────────────────
-    resolve_ctx = _build_resolve_x_context(result, tz_text, hints_ctx)
+    resolve_ctx = _build_resolve_x_context(result, tz_text, hints_ctx, db=db)
     if resolve_ctx:
         data3 = await _call(
             [{"role": "user", "content": resolve_ctx}],

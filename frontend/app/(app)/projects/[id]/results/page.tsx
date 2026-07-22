@@ -140,6 +140,13 @@ export default function ResultsPage() {
           </div>
         )}
 
+        {result && (result.warnings?.length ?? 0) > 0 && (
+          <div style={{ padding: '12px 16px', background: 'var(--status-warning-bg)', border: '1px solid var(--warning-500)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--warning-400)' }}>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>⚠ Предупреждения расчёта (влияют на точность цены):</div>
+            {result.warnings!.map((w, i) => <div key={i} style={{ marginLeft: 12 }}>• {w}</div>)}
+          </div>
+        )}
+
         {result && (
           <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
             {/* Header */}
