@@ -5,6 +5,7 @@ from typing import Optional
 
 import anthropic
 import httpx
+from pydantic import ValidationError as PydanticValidationError
 
 from app.config import settings
 from app.schemas import CoefficientInput, ExtractionResult
@@ -981,28 +982,40 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
             return resp.text
 
     async def _call(messages: list[dict], tools: list, tool_name: str, max_tokens: int) -> dict:
-        payload = {
-            "model": model_id,
-            "max_tokens": max_tokens,
-            "temperature": 0,
-            "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
-            "tools": tools,
-            # No tool_choice — let the model decide; avoids 404 on providers
-            # that don't support forced function calling.
-        }
-        async with httpx.AsyncClient(timeout=180) as http:
-            resp = await http.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                json=payload,
-                headers=_or_headers(),
-            )
-        if not resp.is_success:
-            raise ValueError(f"OpenRouter {resp.status_code} для модели '{model_id}': {_or_error(resp)}")
-        try:
-            return resp.json()
-        except Exception:
-            preview = resp.text[:300].replace("\n", " ")
-            raise ValueError(f"OpenRouter вернул не-JSON (ct={resp.headers.get('content-type','?')}): {preview}")
+        # Модели пишут текстовое рассуждение перед tool_call; при обрезке по
+        # max_tokens провайдер отдаёт tool_call с пустыми аргументами "{}".
+        # Поэтому: finish_reason=length → один ретрай с 4-кратным бюджетом.
+        budget = max_tokens
+        data: dict = {}
+        for attempt in range(2):
+            payload = {
+                "model": model_id,
+                "max_tokens": budget,
+                "temperature": 0,
+                "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+                "tools": tools,
+                # No tool_choice — let the model decide; avoids 404 on providers
+                # that don't support forced function calling.
+            }
+            async with httpx.AsyncClient(timeout=180) as http:
+                resp = await http.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    json=payload,
+                    headers=_or_headers(),
+                )
+            if not resp.is_success:
+                raise ValueError(f"OpenRouter {resp.status_code} для модели '{model_id}': {_or_error(resp)}")
+            try:
+                data = resp.json()
+            except Exception:
+                preview = resp.text[:300].replace("\n", " ")
+                raise ValueError(f"OpenRouter вернул не-JSON (ct={resp.headers.get('content-type','?')}): {preview}")
+            finish = data.get("choices", [{}])[0].get("finish_reason")
+            if finish == "length" and attempt == 0:
+                budget = max_tokens * 4
+                continue
+            break
+        return data
 
     async def _call_plain(messages: list[dict], max_tokens: int) -> str:
         payload = {
@@ -1088,7 +1101,20 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
             overall_confidence=0.0,
         )
 
-    result = ExtractionResult(**json.loads(tool_calls[0]["function"]["arguments"]))
+    try:
+        result = ExtractionResult(**json.loads(tool_calls[0]["function"]["arguments"]))
+    except (json.JSONDecodeError, PydanticValidationError):
+        finish = data1.get("choices", [{}])[0].get("finish_reason")
+        return ExtractionResult(
+            entities=[],
+            stage="П+Р",
+            region="",
+            missing_data=[
+                f"OpenRouter ({model_id}): невалидные аргументы tool_call "
+                f"(finish_reason={finish}) — вероятно, ответ обрезан по max_tokens"
+            ],
+            overall_confidence=0.0,
+        )
     _fill_sbts_table_from_type_id(result, db)
     _fill_sbts_codes(result, db, detected_codes)
 
