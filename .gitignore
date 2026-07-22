@@ -11,3 +11,7 @@ alembic/versions/*.py
 !alembic/versions/.gitkeep
 dist/
 build/
+
+# DB dumps (personal data — never commit)
+ib_calculator.dump
+*.dump

@@ -11,12 +11,24 @@ from app.models import AsutpFactorOption, AsutpModule, PriceIndex, ReferenceBook
 
 ROMAN = {1: "I", 2: "II", 3: "III", 4: "IV"}
 STAGE_FACTORS = {"П": 0.4, "Р": 0.6, "П+Р": 1.0}
-# When stage="П+Р", emit two positions per entity: ПД then РД
-STAGE_SPLIT = {
-    "П+Р": [("ПД", 0.4), ("РД", 0.6)],
-    "П":   [("ПД", 0.4)],
-    "Р":   [("РД", 0.6)],
-}
+# Default ПД/РД distribution — МУ №620 п.1.4. Overridden per book via
+# reference_books.pd_pct / rd_pct (НЗ задают своё распределение).
+DEFAULT_PD_PCT = 0.4
+DEFAULT_RD_PCT = 0.6
+
+
+def _stage_splits_for_book(book, stage: str) -> list[tuple[str, float]]:
+    """When stage="П+Р", emit two positions per entity: ПД then РД.
+
+    Percentages come from the book (pd_pct/rd_pct), falling back to МУ №620.
+    """
+    pd = float(book.pd_pct) if getattr(book, "pd_pct", None) is not None else DEFAULT_PD_PCT
+    rd = float(book.rd_pct) if getattr(book, "rd_pct", None) is not None else DEFAULT_RD_PCT
+    return {
+        "П+Р": [("ПД", pd), ("РД", rd)],
+        "П":   [("ПД", pd)],
+        "Р":   [("РД", rd)],
+    }.get(stage, [("", 1.0)])
 
 
 def _normalize_unit(u: str) -> str:
@@ -62,9 +74,16 @@ UNIT_CONVERSIONS: dict[tuple[str, str], Callable[[float], float]] = {
     ("л/с", "тыс. м³/сут"):      lambda x: x * 0.0864,
     ("м³/ч", "л/с"):             lambda x: x / 3.6,
     ("тыс. м³/ч", "л/с"):        lambda x: x / 0.0036,
-    # distance
+    # distance (п.м ≡ м для линейных сооружений)
     ("км", "м"):                  lambda x: x * 1000,
     ("м", "км"):                  lambda x: x / 1000,
+    ("км", "п.м"):                lambda x: x * 1000,
+    ("п.м", "км"):                lambda x: x / 1000,
+    ("м", "п.м"):                 lambda x: x,
+    ("п.м", "м"):                 lambda x: x,
+    # volume (строительный объём, ёмкость резервуаров)
+    ("м³", "тыс. м³"):            lambda x: x / 1000,
+    ("тыс. м³", "м³"):            lambda x: x * 1000,
 }
 
 # Long-form unit names (from reference_rows) → canonical abbreviations used in UNIT_CONVERSIONS
@@ -91,6 +110,14 @@ _UNIT_ALIASES: dict[str, str] = {
     "м3/ч":                            "м³/ч",
     "тыс.м3/сут":                      "тыс. м³/сут",
     "тыс.м3/ч":                        "тыс. м³/ч",
+    "тысяча кубических метров":        "тыс. м³",
+    "тыс. кубических метров":          "тыс. м³",
+    "тыс.м³":                          "тыс. м³",
+    "тыс.м3":                          "тыс. м³",
+    "квадратных метров":               "м²",
+    "квадратный метр":                 "м²",
+    "гектар":                          "га",
+    "гектаров":                        "га",
 }
 
 
@@ -107,6 +134,10 @@ class RowMatch:
     x_boundary: Optional[float] # boundary value used for extrapolation
     note: str                   # human-readable conversion / extrapolation note
     used_minimum: bool = False  # True when x_value was None and minimum row was used
+    # 707/пр п.131 ф.8.4/8.5: X < Xмин/2 → цена на X=Xмин/2, умноженная на Кэ (≥0.1)
+    extrap_scale: float = 1.0
+    # 707/пр п.133 ф.8.6–8.8: a-only таблица → цена интер/экстраполирована напрямую (тыс.руб)
+    override_price_thous: Optional[float] = None
 
 
 # Physical units requiring actual dimensional conversion.
@@ -116,6 +147,7 @@ _PHYSICAL_UNITS: frozenset[str] = frozenset({
     "м³/сут", "тыс. м³/сут", "м³/ч", "тыс. м³/ч",
     "л/с", "т/сут", "т/г.", "тыс. т/г.", "км", "м", "п.м",
     "мвт", "квт", "гкал/ч", "мва", "ква",
+    "м³", "тыс. м³", "га", "м²", "тыс. м²",
 })
 
 
@@ -210,26 +242,114 @@ def _match_row(
             if (x_min is None or x_eff >= x_min) and (x_max is None or x_eff <= x_max):
                 return RowMatch(r, x_eff, False, None, note)
 
-    # Pass 2: extrapolation — boundary row (МУ №620 Прил.1)
+    # Pass 2: extrapolation — boundary row (МУ №620 Прил.1 / 707/пр п.131, 133)
+    def _join(base: str, extra: str) -> str:
+        return f"{base}; {extra}" if base else extra
+
     for x_eff, note, rows in candidates:
+        # 707/пр п.133 (ф.8.6–8.8): таблица только с параметром «а» —
+        # интерполяция между опорными точками, экстраполяция со сглаживанием 0.6
+        ao = _a_only_price(rows, x_eff)
+        if ao is not None:
+            price, brow, extrap_note = ao
+            return RowMatch(
+                brow, x_eff, True, None, _join(note, extrap_note),
+                override_price_thous=price,
+            )
+
         maxes = [(float(r.x_max), r) for r in rows if r.x_max is not None]
         mins  = [(float(r.x_min), r) for r in rows if r.x_min is not None]
 
         if maxes and x_eff > max(v for v, _ in maxes):
             bval, brow = max(maxes, key=lambda t: t[0])
             extrap_note = f"экстраполяция (X={x_eff:.4g} > {bval:.4g})"
-            return RowMatch(brow, x_eff, True, bval, f"{note}; {extrap_note}" if note else extrap_note)
+            return RowMatch(brow, x_eff, True, bval, _join(note, extrap_note))
 
         if mins and x_eff < min(v for v, _ in mins):
             bval, brow = min(mins, key=lambda t: t[0])
+            # 707/пр п.131 ф.8.4/8.5: X меньше половины минимального показателя →
+            # цена на X=Xмин/2 (по ф.8.2), умноженная на Кэ = X/(0.5·Xмин), но не менее 0.1
+            if bval > 0 and x_eff < 0.5 * bval:
+                scale = max(0.1, x_eff / (0.5 * bval))
+                extrap_note = (
+                    f"707/пр п.131 ф.8.4 (X={x_eff:.4g} < Xмин/2={0.5 * bval:.4g}, "
+                    f"Кэ={scale:.3g})"
+                )
+                return RowMatch(
+                    brow, x_eff, True, bval, _join(note, extrap_note),
+                    extrap_scale=scale,
+                )
             extrap_note = f"экстраполяция (X={x_eff:.4g} < {bval:.4g})"
-            return RowMatch(brow, x_eff, True, bval, f"{note}; {extrap_note}" if note else extrap_note)
+            return RowMatch(brow, x_eff, True, bval, _join(note, extrap_note))
 
     return None
 
 
-_PRICING_COEFFS = {"reconstruction", "overhaul", "deepening"}  # always multiply; shown separately per step
-_COMPLEX_COEFFS = {"asu", "seismic", "fishery"}  # sum fractional parts: 1+Σ(Ki-1)
+def _a_only_price(
+    rows: list[ReferenceRow], x_eff: float
+) -> Optional[tuple[float, ReferenceRow, str]]:
+    """707/пр п.133 (ф.8.6–8.8): price for tables carrying only parameter «а».
+
+    Applies when EVERY row of the candidate set has b=NULL and at least two rows
+    carry a boundary value (опорные точки = x_max, либо x_min для «свыше»-строк).
+    Returns (price_thous, anchor_row, note) or None when not applicable.
+
+    ф.8.6 — линейная интерполяция между соседними опорными точками;
+    ф.8.7 — ниже минимальной точки: наклон первого сегмента × 0.6 (не ниже 0.1·a₁);
+    ф.8.8 — выше максимальной: наклон последнего сегмента × 0.6.
+    """
+    pts: list[tuple[float, float, ReferenceRow]] = []
+    for r in rows:
+        if r.b is not None:
+            return None  # смешанная таблица → стандартный путь
+        xp = r.x_max if r.x_max is not None else r.x_min
+        if xp is None or r.a is None:
+            continue
+        pts.append((float(xp), float(r.a), r))
+    if len(pts) < 2:
+        return None
+    pts.sort(key=lambda p: p[0])
+    xs = [p[0] for p in pts]
+    avals = [p[1] for p in pts]
+
+    if x_eff < xs[0]:
+        slope = (avals[1] - avals[0]) / (xs[1] - xs[0]) if xs[1] != xs[0] else 0.0
+        price = avals[0] - slope * (xs[0] - x_eff) * 0.6
+        price = max(price, 0.1 * avals[0])
+        return price, pts[0][2], f"707/пр п.133 ф.8.7 (X={x_eff:.4g} < {xs[0]:.4g})"
+
+    if x_eff > xs[-1]:
+        slope = (avals[-1] - avals[-2]) / (xs[-1] - xs[-2]) if xs[-1] != xs[-2] else 0.0
+        price = avals[-1] + slope * (x_eff - xs[-1]) * 0.6
+        return price, pts[-1][2], f"707/пр п.133 ф.8.8 (X={x_eff:.4g} > {xs[-1]:.4g})"
+
+    for i in range(len(pts) - 1):
+        if xs[i] <= x_eff <= xs[i + 1]:
+            t = (x_eff - xs[i]) / (xs[i + 1] - xs[i]) if xs[i + 1] != xs[i] else 0.0
+            price = avals[i] + t * (avals[i + 1] - avals[i])
+            return price, pts[i][2], "707/пр п.133 ф.8.6 (интерполяция)"
+
+    return None
+
+
+_PRICING_COEFFS = {"reconstruction", "overhaul", "deepening"}  # legacy: multiply; shown separately per step
+_COMPLEX_COEFFS = {"asu", "seismic", "fishery"}  # legacy: sum fractional parts: 1+Σ(Ki-1)
+
+
+def _coeff_mode(c: dict) -> str:
+    """Combining mode for a resolved coefficient.
+
+    Explicit book_conditions.apply_mode wins; legacy fallback by key name;
+    unknown keys default to "multiply" — a resolved book condition must never
+    be silently dropped.
+    """
+    mode = (c.get("_apply_mode") or "").strip().lower()
+    if mode in ("multiply", "additive"):
+        return mode
+    name = (c.get("name") or "").strip()
+    if name in _COMPLEX_COEFFS:
+        return "additive"
+    return "multiply"
 
 _RE_ROW_N   = re.compile(r'п\.?\s*(\d+)', re.IGNORECASE)
 _RE_RNG_SEG = re.compile(r'(\d+)(?:-(\d+))?')
@@ -266,7 +386,7 @@ def _row_in_range(row_num_str: Optional[str], row_range: Optional[str]) -> bool:
 def _resolve_coeff_values(
     db: Session, book_id: int, table_num: int, coefficients: list[dict],
     matched_row_num: Optional[str] = None,
-) -> list[dict]:
+) -> tuple[list[dict], list[str]]:
     """Replace AI flag-values (1.0) with actual coeff_max from book_conditions.
 
     Lookup order: table-specific conditions first (filtered by row_range against
@@ -274,10 +394,15 @@ def _resolve_coeff_values(
 
     matched_row_num: row_num of the DB row that was matched (e.g. "п.10").
     When provided, conditions whose row_range does NOT include this row are skipped.
+
+    Returns (resolved, dropped): dropped lists coeff keys the AI flagged but the
+    reference book has no condition for — the caller MUST surface these loudly,
+    a silently dropped coefficient means an underpriced position.
     """
     from app.models import BookCondition
 
     resolved = []
+    dropped: list[str] = []
     for c in coefficients:
         key = (c.get("name") or "").strip()
         if not key:
@@ -315,7 +440,8 @@ def _resolve_coeff_values(
             )
 
         if cond is None or (cond.coeff_max is None and cond.coeff_min is None):
-            continue  # no applicable condition → skip
+            dropped.append(key)  # no applicable condition → surface, don't hide
+            continue
 
         ai_value = float(c.get("value", 1.0))
         is_flag = abs(ai_value - 1.0) < 0.001
@@ -332,31 +458,40 @@ def _resolve_coeff_values(
             "value": value,
             "condition_short": cond.condition_short or "",
             "_table_num": cond.table_num,
+            "_apply_mode": getattr(cond, "apply_mode", None),
         })
-    return resolved
+    return resolved, dropped
 
 
-def _apply_coefficients(coefficients: list[dict]) -> tuple[float, list[tuple[str, float, str]]]:
-    """МУ №620 п.3.14: compute combined factor + list of (name, value, condition_short).
+def _apply_coefficients(coefficients: list[dict]) -> tuple[float, list[tuple[str, float, str, str]]]:
+    """МУ №620 п.3.14: compute combined factor + applied coefficient list.
 
-    Returns the factor and the resolved coefficient list for justification building.
+    Mode per coefficient — book_conditions.apply_mode, legacy fallback by key:
+      multiply — ценообразующие, перемножаются (в т.ч. понижающие, K<1)
+      additive — усложняющие, 1+Σ(Ki−1)
+
+    Returns (factor, [(name, value, condition_short, mode), ...]).
     """
     pricing = 1.0
-    complex_parts: list[tuple[str, float]] = []
-    applied: list[tuple[str, float, str]] = []  # (name, resolved_value, condition_short)
+    complex_parts: list[float] = []
+    applied: list[tuple[str, float, str, str]] = []
 
     for c in coefficients:
         name = (c.get("name") or "").strip()
         value = float(c.get("value") or 1.0)
         short = c.get("condition_short", "")
-        if name in _PRICING_COEFFS and value != 1.0:
+        mode = _coeff_mode(c)
+        if value == 1.0 or not name:
+            continue
+        if mode == "additive":
+            if value > 1.0:
+                complex_parts.append(value - 1.0)
+                applied.append((name, value, short, mode))
+        else:
             pricing *= value
-            applied.append((name, value, short))
-        elif name in _COMPLEX_COEFFS and value > 1.0:
-            complex_parts.append((name, value - 1.0))
-            applied.append((name, value, short))
+            applied.append((name, value, short, mode))
 
-    complex_factor = 1.0 + sum(v for _, v in complex_parts)
+    complex_factor = 1.0 + sum(complex_parts)
     combined = pricing * complex_factor
     return combined, applied
 
@@ -456,12 +591,16 @@ def _get_quarterly_index(db: Session, base_year: int):
 
 def _calculate_asutp_position(
     entity: dict[str, Any], book: ReferenceBook, db: Session, stage: str,
+    warnings: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """СБЦП-2001-22 factor-based ASUTP calculation.
 
     Formula per module: Σ_баллов × S × K × stage_pct
     Total base: sum of modules (тыс.руб.)
     Final cost: total_base × Ki (stage already embedded)
+
+    Unknown (factor, option) pairs are reported into `warnings` — a silently
+    skipped factor means 0 баллов and an underpriced position.
     """
     asutp_factors: dict[str, str] = entity.get("asutp_factors") or {}
     asutp_k = float(entity.get("asutp_k") or 1.0)
@@ -480,6 +619,7 @@ def _calculate_asutp_position(
     module_results = []
 
     _MODULE_ATTR = {"ОР": "or", "ОО": "oo", "ИО": "io", "ТО": "to", "МО": "mo", "ПО": "po"}
+    _unknown_opts: set[tuple[str, str]] = set()
 
     for mod in modules:
         score_attr = "score_" + _MODULE_ATTR.get(mod.module_code, mod.module_code.lower())
@@ -504,6 +644,8 @@ def _calculate_asutp_position(
             )
             if opt:
                 total_score += getattr(opt, score_attr, None) or 0
+            else:
+                _unknown_opts.add((factor_code, option_code))
 
         s = float(mod.s_value)
         module_cost_thous = total_score * s * asutp_k * pct
@@ -512,6 +654,13 @@ def _calculate_asutp_position(
             "module": mod.module_code, "score": total_score,
             "s": s, "pct": pct, "cost_thous": module_cost_thous,
         })
+
+    if _unknown_opts and warnings is not None:
+        pairs = ", ".join(f"{f}={o}" for f, o in sorted(_unknown_opts))
+        warnings.append(
+            f"{object_name}: недопустимые коды факторов АСУТП ({pairs}) — фактор даёт 0 баллов, "
+            f"цена занижена. Проверьте формат кодов (Ф5→п.2.x, Ф9→п.6.x, Ф10→п.7.x)"
+        )
 
     base_year = book.price_base_year or 2001
     idx_rec = _get_quarterly_index(db, base_year)
@@ -580,6 +729,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
 
     positions = []
     errors = []
+    warnings: list[str] = []
 
     for entity in entities:
         sbts_code      = entity.get("sbts_code", "")
@@ -596,10 +746,20 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             errors.append(f"{object_name}: активный справочник «{sbts_code}» не найден")
             continue
 
+        # ── Survey books (изыскания) are priced by igi_calculator, not here ──
+        # Their rows are in RUBLES (not тыс.руб) — pricing them through the
+        # standard (a+b×X)×1000 path would inflate cost ×1000.
+        if getattr(book, 'calc_method', 'standard') == 'survey':
+            errors.append(
+                f"{object_name}: «{book.code}» — справочник изысканий; позиция считается "
+                f"в блоке «Изыскания» (ИГИ/ИГДИ/ИГФИ), не в основном расчёте ПИР"
+            )
+            continue
+
         # ── ASUTP factor-based path (no table_num needed) ────────────────────
         if getattr(book, 'calc_method', 'standard') == 'asutp':
             try:
-                pos = _calculate_asutp_position(entity, book, db, stage)
+                pos = _calculate_asutp_position(entity, book, db, stage, warnings=warnings)
                 pos["num"] = len(positions) + 1
                 positions.append(pos)
             except ValueError as exc:
@@ -621,18 +781,27 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         a = float(row.a) if row.a is not None else 0.0
         b = float(row.b) if row.b is not None else 0.0
 
-        # МУ №620 Прил.1 extrapolation
+        # МУ №620 Прил.1 / 707/пр п.131 extrapolation
         if match.extrapolated and match.x_boundary is not None:
-            x_calc = 0.4 * match.x_boundary + 0.6 * match.x_effective
+            if match.extrap_scale != 1.0:
+                # 707/пр ф.8.4: цена считается в точке X=Xмин/2 (по ф.8.2), затем ×Кэ
+                x_calc = 0.4 * match.x_boundary + 0.6 * (0.5 * match.x_boundary)
+            else:
+                x_calc = 0.4 * match.x_boundary + 0.6 * match.x_effective
         else:
             x_calc = match.x_effective
 
         # МУ №620 п.3.14: apply coefficients (resolve AI flag→actual DB value first)
-        coefficients = _resolve_coeff_values(
+        coefficients, dropped_coeffs = _resolve_coeff_values(
             db, book.id, table_num, entity.get("coefficients", []),
             matched_row_num=row.row_num,
         )
         coeff_factor, applied_coeffs = _apply_coefficients(coefficients)
+        for _dk in dropped_coeffs:
+            warnings.append(
+                f"{object_name}: коэффициент «{_dk}» заявлен по ТЗ, но в справочнике "
+                f"{book.code} (табл. {table_num}) нет условия — НЕ применён, цена может быть занижена"
+            )
 
         # Per-book price index (base_year → current quarter)
         base_year = getattr(book, 'price_base_year', 2001) or 2001
@@ -646,8 +815,26 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             idx_period = "—"
             idx_justification = f"Индекс к {base_year} не задан"
 
-        # Reference rows in тыс. руб. at book's base year level
-        unit_cost_base = (a + b * x_calc) * 1000   # base rubles (pre-index)
+        # ── Unit-priced row detection ─────────────────────────────────────────
+        # Row with b=NULL and no X range (x_min/x_max both NULL) is a per-item
+        # price (цена за 1 шт/ячейку/пункт). X then means item count:
+        # cost = a × X. Otherwise the range formula (a + b×X) applies.
+        is_unit_priced = (
+            row.b is None and row.x_min is None and row.x_max is None
+            and match.override_price_thous is None
+        )
+        unit_count = 1.0
+        if match.override_price_thous is not None:
+            # 707/пр п.133: цена уже интер/экстраполирована по опорным точкам «а»
+            unit_cost_base = match.override_price_thous * 1000
+        elif is_unit_priced:
+            unit_count = x_calc if (x_calc and x_calc > 0) else 1.0
+            unit_cost_base = a * 1000 * unit_count      # base rubles (pre-index)
+        else:
+            # Reference rows in тыс. руб. at book's base year level
+            unit_cost_base = (a + b * x_calc) * 1000    # base rubles (pre-index)
+        # 707/пр п.131 ф.8.4/8.5: глубокая экстраполяция вниз → ×Кэ
+        unit_cost_base *= match.extrap_scale
         cost_base = unit_cost_base * qty * coeff_factor
         cost = cost_base * idx_value                # current rubles
 
@@ -666,11 +853,12 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             justification += f" (свыше {_fmt_number(float(row.x_min))})"
         if match.note:
             justification += f" [{match.note}]"
-        if match.extrapolated and match.x_boundary is not None:
+        if match.extrapolated and match.x_boundary is not None and match.extrap_scale == 1.0:
             justification += f"; МУ №620 Прил.1 (X={_fmt_ru(match.x_effective)} {row_unit}, X_расч={_fmt_ru(x_calc)})"
-        for _name, _val, _short in applied_coeffs:
-            para = f"п. 2.{table_num}" if table_num else "п. 1"
-            justification += f"; {para} ({_short} К={_fmt_ru(_val)})"
+        for _name, _val, _short, _mode in applied_coeffs:
+            # condition_short несёт собственную ссылку на пункт справочника
+            label = _short or _name
+            justification += f"; {label} (К={_fmt_ru(_val)})"
         if match.used_minimum:
             missing_hint = entity.get("x_value_missing_reason") or ""
             justification += f" [по мин. X={_fmt_ru(match.x_effective)}"
@@ -681,14 +869,20 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         # ── Formula (расчёт стоимости) ────────────────────────────────────────
         a_rub, b_rub = a * 1000, b * 1000
         x_formula = x_calc if (match.extrapolated and match.x_boundary is not None) else match.x_effective
-        if b:
+        if match.override_price_thous is not None:
+            formula = _fmt_ru(match.override_price_thous * 1000)
+        elif is_unit_priced and unit_count != 1.0:
+            formula = f"{_fmt_ru(a_rub)}*{_fmt_ru(unit_count)}"
+        elif b:
             formula = f"({_fmt_ru(a_rub)}+{_fmt_ru(b_rub)}*{_fmt_ru(x_formula)})"
         else:
             formula = _fmt_ru(a_rub)
-        for _n, _v, _ in applied_coeffs:
-            if _n in _PRICING_COEFFS and _v != 1.0:
+        if match.extrap_scale != 1.0:
+            formula += f"×{_fmt_ru(match.extrap_scale)}"
+        for _n, _v, _s, _m in applied_coeffs:
+            if _m == "multiply" and _v != 1.0:
                 formula += f"×{_fmt_ru(_v)}"
-        _complex_vals = [_v for _n, _v, _ in applied_coeffs if _n in _COMPLEX_COEFFS and _v > 1.0]
+        _complex_vals = [_v for _n, _v, _s, _m in applied_coeffs if _m == "additive" and _v > 1.0]
         if _complex_vals:
             _cf = 1.0 + sum(_v - 1.0 for _v in _complex_vals)
             formula += f"×{_fmt_ru(_cf)}"
@@ -697,7 +891,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         if qty > 1:
             formula += f"*{qty}"
 
-        stage_splits = STAGE_SPLIT.get(stage, [("", 1.0)])
+        stage_splits = _stage_splits_for_book(book, stage)
         for stage_label, stage_pct in stage_splits:
             sect_pct = 1.0
             if stage_label == "ПД":
@@ -771,6 +965,22 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
                 "justification": p["price_index_justification"],
             }
 
+    # ── Index freshness check — stale/missing index silently distorts КП price ──
+    from datetime import date as _date
+    _today = _date.today()
+    _cur_q = (_today.month - 1) // 3 + 1
+    for _by in index_summary:
+        _rec = _get_quarterly_index(db, _by)
+        if _rec is None:
+            warnings.append(
+                f"Индекс пересчёта к базе {_by} г. не задан — позиции выведены в базовом уровне цен!"
+            )
+        elif (_rec.year, _rec.quarter) < (_today.year, _cur_q):
+            warnings.append(
+                f"Индекс к базе {_by} г. устарел: {ROMAN.get(_rec.quarter, _rec.quarter)} кв. {_rec.year} г., "
+                f"текущий квартал — {ROMAN.get(_cur_q, _cur_q)} кв. {_today.year} г. Проверьте письма Минстроя."
+            )
+
     # Backward-compat single-index fields (filled when all positions share one index)
     if len(index_summary) == 1:
         si = next(iter(index_summary.values()))
@@ -812,4 +1022,5 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         "vat_amount":                vat_amount,
         "total_with_vat":            total_with_vat,
         "errors":                    errors,
+        "warnings":                  warnings,
     }

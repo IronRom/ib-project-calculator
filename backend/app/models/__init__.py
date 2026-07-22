@@ -52,6 +52,10 @@ class BookCondition(Base):
     coeff_min = Column(Numeric(8, 4), nullable=True)
     coeff_max = Column(Numeric(8, 4), nullable=True)
     coeff_key = Column(String(30), nullable=True)            # "asu", "seismic", "reconstruction", etc.
+    # How the coefficient combines: "multiply" (ценообразующий, перемножается) |
+    # "additive" (усложняющий, 1+Σ(Ki−1) по МУ №620 п.3.14).
+    # NULL → legacy behavior: режим определяется по имени ключа в calculator.
+    apply_mode = Column(String(10), nullable=True)
 
     book = relationship("ReferenceBook")
 
@@ -130,6 +134,10 @@ class ReferenceBook(Base):
     is_active = Column(Boolean, nullable=False, default=False)
     price_base_year = Column(Integer, nullable=False, default=2001)
     calc_method = Column(String(20), nullable=False, default="standard")  # standard | asutp
+    # Per-book П/Р distribution (fraction of base price). NULL → МУ №620 п.1.4 default (0.4/0.6).
+    # НЗ книги задают своё распределение (например НЗ-847 табл.2.3: П=0.6, Р=0.4).
+    pd_pct = Column(Numeric(4, 3), nullable=True)
+    rd_pct = Column(Numeric(4, 3), nullable=True)
     parse_prompt = Column(Text, nullable=True)
     pdf_filename = Column(String(500), nullable=True)
     pdf_path = Column(String(1000), nullable=True)

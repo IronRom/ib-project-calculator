@@ -108,6 +108,10 @@ def update_reference(
         book.parse_prompt = body.parse_prompt
     if body.price_base_year is not None:
         book.price_base_year = body.price_base_year
+    if body.pd_pct is not None:
+        book.pd_pct = body.pd_pct
+    if body.rd_pct is not None:
+        book.rd_pct = body.rd_pct
     db.commit()
     db.refresh(book)
     return book
