@@ -358,6 +358,18 @@ export function getIgiBookRows(
   )
 }
 
+export interface SurveyBook {
+  book_id: number
+  book_code: string
+  label: string
+}
+
+export function getSurveyBooks(projectId: number, calcId: number) {
+  return request<SurveyBook[]>(
+    `/projects/${projectId}/calculations/${calcId}/igi/books`
+  )
+}
+
 export function saveGeologicalSurveys(
   projectId: number, calcId: number, surveys: GeologicalSurvey[]
 ): Promise<CalculationResult> {
@@ -505,6 +517,7 @@ export interface CalculationResult {
   vat_amount: number
   total_with_vat: number
   errors: string[]
+  warnings?: string[]
 }
 
 // ── ИГИ (geological survey) ───────────────────────────────────────────────────

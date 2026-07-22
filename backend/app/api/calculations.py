@@ -177,6 +177,30 @@ def patch_entity_x_value(
     return entity
 
 
+@router.get("/{calc_id}/igi/books")
+def list_survey_books(
+    project_id: int,
+    calc_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Active survey books (изыскания) for the book picker on the geology page."""
+    from app.models import ReferenceBook
+    from app.services.igi_calculator import _survey_label
+
+    _get_own_project(project_id, current_user.id, db)
+    books = (
+        db.query(ReferenceBook)
+        .filter(ReferenceBook.is_active == True, ReferenceBook.calc_method == "survey")
+        .order_by(ReferenceBook.code)
+        .all()
+    )
+    return [
+        {"book_id": b.id, "book_code": b.code, "label": _survey_label(b.code)}
+        for b in books
+    ]
+
+
 @router.get("/{calc_id}/igi/book-rows")
 def list_igi_book_rows(
     project_id: int,
@@ -445,7 +469,8 @@ def correct_and_compute(
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     msg = client.messages.create(
-        model="claude-sonnet-4-6",
+        temperature=0,
+        model=settings.extraction_model,
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )

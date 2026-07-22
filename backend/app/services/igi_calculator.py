@@ -23,10 +23,53 @@ from sqlalchemy.orm import Session
 
 from app.models import BookCondition, PriceQuarterlyIndex, ReferenceBook, ReferenceRow
 
-_CAT_ROW_RANGES = {1: (1, 7), 2: (8, 15), 3: (16, 24)}
 _RE_ROW_NUM = re.compile(r'п\.(\d+)')
+_RE_RNG_SEG = re.compile(r'(\d+)(?:-(\d+))?')
+
+
+def _report_config(db: Session, book_version_id: int, complexity_cat: int):
+    """Universal тех.отчёт config from book_conditions (no hardcoded table numbers).
+
+    Conventions per survey book:
+      coeff_key='report_table'   → coeff_min = номер таблицы стоимости отчёта
+      coeff_key='report_cat_{n}' → row_range = строки этой категории ('пп.8-15')
+
+    Returns (report_table_num, (lo_row, hi_row) | None) or (None, None)
+    when the book has no report table configured — auto-report is skipped.
+    """
+    rep = (
+        db.query(BookCondition)
+        .filter(
+            BookCondition.book_version_id == book_version_id,
+            BookCondition.coeff_key == "report_table",
+        )
+        .first()
+    )
+    if not rep or rep.coeff_min is None:
+        return None, None
+    table_num = int(rep.coeff_min)
+
+    cat = (
+        db.query(BookCondition)
+        .filter(
+            BookCondition.book_version_id == book_version_id,
+            BookCondition.coeff_key == f"report_cat_{complexity_cat}",
+        )
+        .first()
+    )
+    rng = None
+    if cat and cat.row_range:
+        m = _RE_RNG_SEG.search(cat.row_range.replace("пп.", "").replace("п.", ""))
+        if m:
+            lo = int(m.group(1))
+            hi = int(m.group(2)) if m.group(2) else lo
+            rng = (lo, hi)
+    return table_num, rng
 
 _SURVEY_LABEL_MAP = [
+    # порядок важен: ИГДИ/ИГФИ до ИГИ (подстроки)
+    ("ИГДИ",  "Инженерно-геодезические изыскания"),
+    ("ИГФИ",  "Инженерно-геофизические изыскания"),
     ("геолог", "Инженерно-геологические изыскания"),
     ("ИГИ",   "Инженерно-геологические изыскания"),
     ("геодез", "Инженерно-геодезические изыскания"),
@@ -90,32 +133,40 @@ def _get_k1_for_table(
 def _lookup_report_cost(
     db: Session, book_version_id: int, kameral_total_rub: float, complexity_cat: int,
 ) -> float:
-    """Lookup Таблица 65 НЗ-2025-МС281-ИГИ: cost of technical report.
+    """Cost of the technical report from the book's report table.
+
+    Table number and category row ranges come from book_conditions
+    (report_table / report_cat_N) — see _report_config. Returns 0.0 when the
+    book has no report table configured.
 
     X = kameral_total_rub converted to тыс.руб.
     Returns cost in rubles at base year level (before index).
-
-    Linear interpolation per НЗ п.121 примечание 1.
+    Linear interpolation between reference points (например НЗ-281 п.121 прим.1).
     Reference points stored as x_max (regular rows) or x_min (last "свыше" row).
-    complexity_cat determines which row set (I → п.1-7, II → п.8-15, III → п.16-24).
     """
     kameral_thous = kameral_total_rub / 1000
 
-    lo_p, hi_p = _CAT_ROW_RANGES.get(complexity_cat, (8, 15))
+    report_table, cat_range = _report_config(db, book_version_id, complexity_cat)
+    if report_table is None:
+        return 0.0
 
     rows: list[ReferenceRow] = (
         db.query(ReferenceRow)
         .filter(
             ReferenceRow.book_version_id == book_version_id,
-            ReferenceRow.table_num == 65,
+            ReferenceRow.table_num == report_table,
         )
         .all()
     )
-    cat_rows = []
-    for r in rows:
-        m = _RE_ROW_NUM.search(r.row_num or "")
-        if m and lo_p <= int(m.group(1)) <= hi_p:
-            cat_rows.append(r)
+    if cat_range is not None:
+        lo_p, hi_p = cat_range
+        cat_rows = []
+        for r in rows:
+            m = _RE_ROW_NUM.search(r.row_num or "")
+            if m and lo_p <= int(m.group(1)) <= hi_p:
+                cat_rows.append(r)
+    else:
+        cat_rows = rows
 
     if not cat_rows:
         return 0.0
@@ -279,20 +330,22 @@ def calculate_igi(
             })
 
         # Auto-append technical report if there are lab/kameral items
-        # НЗ п.121: X = общая стоимость камеральных работ из глав IV-VIII (lab + kameral, excl. program)
+        # (например НЗ-281 п.121: X = стоимость камеральных работ; таблица отчёта
+        #  и категории — из book_conditions report_table / report_cat_N)
         if nonfield_total_base > 0:
+            report_table, _ = _report_config(db, book_version_id, complexity_cat)
             report_cost_base = _lookup_report_cost(db, book_version_id, nonfield_total_base, complexity_cat)
             report_cost = report_cost_base * index_val
             if report_cost > 0:
                 positions.append({
                     "num": len(positions) + 1,
-                    "name": f"Технический отчёт ИГИ (кат.слож.{complexity_cat})",
-                    "row_description": f"Табл.65 НЗ-2025-МС281-ИГИ, кат.слож.{complexity_cat}",
+                    "name": f"Технический отчёт ({survey_section.lower()}, кат.слож.{complexity_cat})",
+                    "row_description": f"Табл.{report_table} {book_code}, кат.слож.{complexity_cat}",
                     "unit": "один отчёт",
                     "quantity": 1,
                     "item_count": 1,
                     "justification": (
-                        f"{book_code}, табл. 65, кат.слож.{complexity_cat}"
+                        f"{book_code}, табл. {report_table}, кат.слож.{complexity_cat}"
                         f" (лаб+камерал: {round(nonfield_total_base/1000, 1)} тыс.руб)"
                     ),
                     "formula": f"{int(report_cost_base)}×{index_val}",
@@ -303,7 +356,7 @@ def calculate_igi(
                     "price_index": index_val,
                     "price_index_period": idx_period,
                     "price_index_justification": idx_just,
-                    "table_num": 65,
+                    "table_num": report_table,
                     "row_num": "",
                     "used_minimum": False,
                     "section_num": 0,

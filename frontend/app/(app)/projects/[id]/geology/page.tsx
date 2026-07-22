@@ -3,9 +3,9 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import {
-  getIgiBookRows, saveGeologicalSurveys,
+  getIgiBookRows, getSurveyBooks, saveGeologicalSurveys,
   GeologicalSurvey, IgiItem, IgiObjectType, IgiBookRow,
-  IgiWorkCategory, CalculationResult,
+  IgiWorkCategory, CalculationResult, SurveyBook,
 } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
@@ -46,13 +46,23 @@ export default function GeologyPage() {
   const [pickerRow, setPickerRow] = useState<IgiBookRow | null>(null)
   const [pickerVolume, setPickerVolume] = useState('')
 
+  const [books, setBooks] = useState<SurveyBook[]>([])
+  const [bookCode, setBookCode] = useState('НЗ-2025-МС281-ИГИ')
+
   useEffect(() => {
     if (!calcId) return
-    getIgiBookRows(Number(id), Number(calcId)).then(d => {
+    getSurveyBooks(Number(id), Number(calcId)).then(setBooks).catch(() => {})
+  }, [id, calcId])
+
+  useEffect(() => {
+    if (!calcId) return
+    getIgiBookRows(Number(id), Number(calcId), bookCode).then(d => {
       setBookData({ bookId: d.book_id, bookCode: d.book_code, objectTypes: d.object_types })
       setSurvey(prev => ({ ...prev, book_id: d.book_id, book_code: d.book_code }))
+      setPickerOtype(null)
+      setPickerRow(null)
     }).catch(e => setError(String(e)))
-  }, [id, calcId])
+  }, [id, calcId, bookCode])
 
   const addItem = useCallback(() => {
     if (!pickerOtype || !pickerRow || !pickerVolume) return
@@ -96,7 +106,8 @@ export default function GeologyPage() {
     }
   }
 
-  const igiPositions = result?.positions?.filter(p => p.section_name === 'ИГИ') ?? []
+  // ИГИ-позиции помечены work_category (field/lab/kameral/program/report)
+  const igiPositions = result?.positions?.filter(p => (p as any).work_category) ?? []
   const igiTotal = igiPositions.length > 0 ? igiPositions.reduce((s, p) => s + p.cost, 0) : null
 
   if (!calcId) return (
@@ -113,6 +124,19 @@ export default function GeologyPage() {
 
         {/* Survey parameters */}
         <div className="bg-neutral-900 rounded-xl p-5 mb-6 flex gap-6 flex-wrap">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-neutral-400">Справочник изысканий</span>
+            <select
+              className="bg-neutral-800 rounded px-3 py-1.5 text-white"
+              value={bookCode}
+              onChange={e => setBookCode(e.target.value)}
+            >
+              {books.length === 0 && <option value={bookCode}>{bookCode}</option>}
+              {books.map(b => (
+                <option key={b.book_id} value={b.book_code}>{b.label} ({b.book_code})</option>
+              ))}
+            </select>
+          </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-neutral-400">Кат. сложности ИГИ</span>
             <select
