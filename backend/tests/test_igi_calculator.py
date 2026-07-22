@@ -33,9 +33,10 @@ def _item(work_category, table_num, row_num, volume, b, x_unit="п.м", deleted=
     }
 
 
+@patch("app.services.igi_calculator._auto_table_config", return_value=(None, None, "nonfield"))
 @patch("app.services.igi_calculator._get_survey_index")
 @patch("app.services.igi_calculator._get_k1_for_table", return_value=None)
-def test_field_item_applies_k1_and_winter(mock_k1, mock_idx):
+def test_field_item_applies_k1_and_winter(mock_k1, mock_idx, _mock_atc):
     mock_idx.return_value = (1.0, "I кв. 2024 г.", "Письмо МС")
     db = MagicMock()
 
@@ -53,7 +54,7 @@ def test_field_item_applies_k1_and_winter(mock_k1, mock_idx):
     assert pos["work_category"] == "field"
 
 
-@patch("app.services.igi_calculator._report_config", return_value=(None, None))
+@patch("app.services.igi_calculator._auto_table_config", return_value=(None, None, "nonfield"))
 @patch("app.services.igi_calculator._get_survey_index")
 def test_lab_item_no_k1(mock_idx, _mock_rc):
     mock_idx.return_value = (2.0, "II кв. 2024 г.", "Письмо МС")
@@ -70,7 +71,7 @@ def test_lab_item_no_k1(mock_idx, _mock_rc):
     assert abs(pos["cost"] - 229 * 50 * 2.0) < 1
 
 
-@patch("app.services.igi_calculator._report_config", return_value=(None, None))
+@patch("app.services.igi_calculator._auto_table_config", return_value=(None, None, "nonfield"))
 @patch("app.services.igi_calculator._get_survey_index")
 def test_deleted_item_skipped(mock_idx, _mock_rc):
     mock_idx.return_value = (1.0, "I кв. 2024 г.", "Письмо МС")
@@ -88,7 +89,10 @@ def test_deleted_item_skipped(mock_idx, _mock_rc):
     assert positions[0]["work_category"] == "lab"
 
 
-@patch("app.services.igi_calculator._report_config", return_value=(65, (8, 15)))
+@patch(
+    "app.services.igi_calculator._auto_table_config",
+    side_effect=lambda db, bid, kind, cat: (65, (8, 15), "nonfield") if kind == "report" else (None, None, "nonfield"),
+)
 @patch("app.services.igi_calculator._get_survey_index")
 def test_report_auto_appended(mock_idx, _mock_rc):
     mock_idx.return_value = (1.0, "I кв. 2024 г.", "Письмо МС")
@@ -98,8 +102,8 @@ def test_report_auto_appended(mock_idx, _mock_rc):
     items = [_item("kameral", 62, "п.2", volume=30, b=381, x_unit="один образец")]
     survey = _survey(items, complexity_category=2)
 
-    # Mock the report lookup to return fixed cost
-    with patch("app.services.igi_calculator._lookup_report_cost") as mock_report:
+    # Mock the interpolation to return fixed cost
+    with patch("app.services.igi_calculator._interpolate_cost_table") as mock_report:
         mock_report.return_value = 200_000.0  # rubles at base level
         positions, errors = calculate_igi([survey], db)
 

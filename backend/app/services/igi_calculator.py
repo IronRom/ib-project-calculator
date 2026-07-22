@@ -27,33 +27,37 @@ _RE_ROW_NUM = re.compile(r'п\.(\d+)')
 _RE_RNG_SEG = re.compile(r'(\d+)(?:-(\d+))?')
 
 
-def _report_config(db: Session, book_version_id: int, complexity_cat: int):
-    """Universal тех.отчёт config from book_conditions (no hardcoded table numbers).
+def _auto_table_config(
+    db: Session, book_version_id: int, kind: str, complexity_cat: int,
+):
+    """Universal авто-позиция config (техотчёт / программа) from book_conditions.
 
-    Conventions per survey book:
-      coeff_key='report_table'   → coeff_min = номер таблицы стоимости отчёта
-      coeff_key='report_cat_{n}' → row_range = строки этой категории ('пп.8-15')
+    Conventions per survey book (kind = 'report' | 'program'):
+      coeff_key='{kind}_table'   → coeff_min = номер таблицы стоимости
+      coeff_key='{kind}_cat_{n}' → row_range = строки категории/группы ('пп.8-15')
+      coeff_key='{kind}_base'    → coeff_min: 1 = камеральные+лабораторные (default),
+                                   2 = полевые(×К1)+лабораторные+камеральные
 
-    Returns (report_table_num, (lo_row, hi_row) | None) or (None, None)
-    when the book has no report table configured — auto-report is skipped.
+    Returns (table_num, (lo_row, hi_row) | None, base_mode) where base_mode is
+    'nonfield' | 'all'; table_num is None when not configured (auto-item skipped).
     """
     rep = (
         db.query(BookCondition)
         .filter(
             BookCondition.book_version_id == book_version_id,
-            BookCondition.coeff_key == "report_table",
+            BookCondition.coeff_key == f"{kind}_table",
         )
         .first()
     )
     if not rep or rep.coeff_min is None:
-        return None, None
+        return None, None, "nonfield"
     table_num = int(rep.coeff_min)
 
     cat = (
         db.query(BookCondition)
         .filter(
             BookCondition.book_version_id == book_version_id,
-            BookCondition.coeff_key == f"report_cat_{complexity_cat}",
+            BookCondition.coeff_key == f"{kind}_cat_{complexity_cat}",
         )
         .first()
     )
@@ -64,6 +68,23 @@ def _report_config(db: Session, book_version_id: int, complexity_cat: int):
             lo = int(m.group(1))
             hi = int(m.group(2)) if m.group(2) else lo
             rng = (lo, hi)
+
+    base_rec = (
+        db.query(BookCondition)
+        .filter(
+            BookCondition.book_version_id == book_version_id,
+            BookCondition.coeff_key == f"{kind}_base",
+        )
+        .first()
+    )
+    base_mode = "all" if (base_rec and base_rec.coeff_min is not None
+                          and int(base_rec.coeff_min) == 2) else "nonfield"
+    return table_num, rng, base_mode
+
+
+def _report_config(db: Session, book_version_id: int, complexity_cat: int):
+    """Back-compat wrapper: (table_num, cat_range) for the тех.отчёт table."""
+    table_num, rng, _ = _auto_table_config(db, book_version_id, "report", complexity_cat)
     return table_num, rng
 
 _SURVEY_LABEL_MAP = [
@@ -146,15 +167,22 @@ def _lookup_report_cost(
     """
     kameral_thous = kameral_total_rub / 1000
 
-    report_table, cat_range = _report_config(db, book_version_id, complexity_cat)
+    report_table, cat_range, _ = _auto_table_config(db, book_version_id, "report", complexity_cat)
     if report_table is None:
         return 0.0
+    return _interpolate_cost_table(db, book_version_id, report_table, cat_range, kameral_thous)
 
+
+def _interpolate_cost_table(
+    db: Session, book_version_id: int, table_num: int,
+    cat_range, x_thous: float,
+) -> float:
+    """Linear interpolation over a cost table's reference points (руб)."""
     rows: list[ReferenceRow] = (
         db.query(ReferenceRow)
         .filter(
             ReferenceRow.book_version_id == book_version_id,
-            ReferenceRow.table_num == report_table,
+            ReferenceRow.table_num == table_num,
         )
         .all()
     )
@@ -185,17 +213,17 @@ def _lookup_report_cost(
 
     ref_points.sort(key=lambda p: p[0])
 
-    if kameral_thous <= ref_points[0][0]:
+    if x_thous <= ref_points[0][0]:
         return ref_points[0][1]
-    if kameral_thous >= ref_points[-1][0]:
+    if x_thous >= ref_points[-1][0]:
         return ref_points[-1][1]
 
     # Linear interpolation between adjacent reference points
     for i in range(len(ref_points) - 1):
         x0, b0 = ref_points[i]
         x1, b1 = ref_points[i + 1]
-        if x0 <= kameral_thous <= x1:
-            t = (kameral_thous - x0) / (x1 - x0)
+        if x0 <= x_thous <= x1:
+            t = (x_thous - x0) / (x1 - x0)
             return b0 + t * (b1 - b0)
 
     return ref_points[-1][1]
@@ -245,9 +273,12 @@ def calculate_igi(
 
         index_val, idx_period, idx_just = _get_survey_index(db, price_base_year)
 
-        # Table 65 X = "общая стоимость камеральных работ из глав IV-VIII НЗ"
-        # = lab (Гл.VII-VIII) + kameral processing (Гл.IV-VIII), excluding program (Гл.X)
-        nonfield_total_base = 0.0  # accumulates lab + kameral at base level for Table 65
+        # Bases for auto-items (техотчёт, программа):
+        #   nonfield_total_base — lab + kameral по показателям затрат
+        #   field_pz_base       — полевые × К1 (без ДЗ/зимы/К2/индекса) — для книг,
+        #                         где X отчёта/программы = полевые + камеральные
+        nonfield_total_base = 0.0
+        field_pz_base = 0.0
 
         items = [it for it in survey.get("items", []) if not it.get("deleted")]
 
@@ -271,6 +302,7 @@ def calculate_igi(
                 effective_k1 = table_k1 if table_k1 is not None else k1
 
                 cost = base * effective_k1 * (1 + winter_factor) * k2 * index_val
+                field_pz_base += base * effective_k1
                 coeff_note = (
                     f"К1={effective_k1}"
                     + (f"; зима {round(winter_factor * 100, 1)}%" if winter_factor else "")
@@ -329,40 +361,54 @@ def calculate_igi(
                 "_stage_embedded": True,  # ИГИ costs are not split by П/Р stage
             })
 
-        # Auto-append technical report if there are lab/kameral items
-        # (например НЗ-281 п.121: X = стоимость камеральных работ; таблица отчёта
-        #  и категории — из book_conditions report_table / report_cat_N)
-        if nonfield_total_base > 0:
-            report_table, _ = _report_config(db, book_version_id, complexity_cat)
-            report_cost_base = _lookup_report_cost(db, book_version_id, nonfield_total_base, complexity_cat)
-            report_cost = report_cost_base * index_val
-            if report_cost > 0:
-                positions.append({
-                    "num": len(positions) + 1,
-                    "name": f"Технический отчёт ({survey_section.lower()}, кат.слож.{complexity_cat})",
-                    "row_description": f"Табл.{report_table} {book_code}, кат.слож.{complexity_cat}",
-                    "unit": "один отчёт",
-                    "quantity": 1,
-                    "item_count": 1,
-                    "justification": (
-                        f"{book_code}, табл. {report_table}, кат.слож.{complexity_cat}"
-                        f" (лаб+камерал: {round(nonfield_total_base/1000, 1)} тыс.руб)"
-                    ),
-                    "formula": f"{int(report_cost_base)}×{index_val}",
-                    "cost": round(report_cost, 2),
-                    "cost_base": round(report_cost_base, 2),
-                    "book_code": book_code,
-                    "price_base_year": price_base_year,
-                    "price_index": index_val,
-                    "price_index_period": idx_period,
-                    "price_index_justification": idx_just,
-                    "table_num": report_table,
-                    "row_num": "",
-                    "used_minimum": False,
-                    "section_num": 0,
-                    "section_name": survey_section,
-                    "work_category": "report",
-                    "_stage_embedded": True,  # ИГИ costs are not split by П/Р stage
-                })
+        # Auto-append технический отчёт и программу (если в book_conditions
+        # заданы report_table / program_table). База X зависит от книги:
+        # 'nonfield' — лаб+камеральные (НЗ-281 п.121, ИГФИ табл.52);
+        # 'all' — полевые(×К1)+камеральные (ИГДИ табл.80/81, ИГФИ табл.53).
+        for kind, label in (("report", "Технический отчёт"), ("program", "Программа изысканий")):
+            auto_table, cat_range, base_mode = _auto_table_config(
+                db, book_version_id, kind, complexity_cat
+            )
+            if auto_table is None:
+                continue
+            base_x = nonfield_total_base + (field_pz_base if base_mode == "all" else 0.0)
+            if base_x <= 0:
+                continue
+            auto_cost_base = _interpolate_cost_table(
+                db, book_version_id, auto_table, cat_range, base_x / 1000
+            )
+            auto_cost = auto_cost_base * index_val
+            if auto_cost <= 0:
+                continue
+            base_note = (
+                "полевые+камеральные" if base_mode == "all" else "лаб+камеральные"
+            )
+            positions.append({
+                "num": len(positions) + 1,
+                "name": f"{label} ({survey_section.lower()}, кат.слож.{complexity_cat})",
+                "row_description": f"Табл.{auto_table} {book_code}",
+                "unit": "один отчёт" if kind == "report" else "программа",
+                "quantity": 1,
+                "item_count": 1,
+                "justification": (
+                    f"{book_code}, табл. {auto_table}"
+                    f" ({base_note}: {round(base_x / 1000, 1)} тыс.руб, интерполяция)"
+                ),
+                "formula": f"{int(auto_cost_base)}×{index_val}",
+                "cost": round(auto_cost, 2),
+                "cost_base": round(auto_cost_base, 2),
+                "book_code": book_code,
+                "price_base_year": price_base_year,
+                "price_index": index_val,
+                "price_index_period": idx_period,
+                "price_index_justification": idx_just,
+                "table_num": auto_table,
+                "row_num": "",
+                "used_minimum": False,
+                "section_num": 0,
+                "section_name": survey_section,
+                "work_category": "report" if kind == "report" else "program",
+                "_stage_embedded": True,  # изыскания не делятся по П/Р
+            })
 
     return positions, errors
