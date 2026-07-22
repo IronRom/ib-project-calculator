@@ -60,6 +60,28 @@ class BookCondition(Base):
     book = relationship("ReferenceBook")
 
 
+class BookSectionShare(Base):
+    """Распределение стоимости по разделам проектной/рабочей документации.
+
+    Источник — таблицы «относительной стоимости разделов» самих СБЦ/НЗ.
+    table_num=None — распределение действует на всю книгу; строка с конкретным
+    table_num перекрывает книжное. stage: 'ПД' | 'РД'. pct — проценты (0-100),
+    сумма всех разделов стадии = 100.
+    """
+    __tablename__ = "book_section_shares"
+
+    id = Column(Integer, primary_key=True, index=True)
+    book_version_id = Column(Integer, ForeignKey("reference_books.id"), nullable=False, index=True)
+    table_num = Column(Integer, nullable=True, index=True)   # NULL = book-wide
+    row_range = Column(String(50), nullable=True)
+    stage = Column(String(2), nullable=False)                # 'ПД' | 'РД'
+    section_code = Column(String(20), nullable=False)        # 'ПЗ', 'АР', 'ИОС.ЭС', ...
+    section_name = Column(Text, nullable=False)
+    pct = Column(Numeric(6, 3), nullable=False)              # 0-100
+
+    book = relationship("ReferenceBook")
+
+
 class BookExtractionHint(Base):
     """Domain-specific extraction rules per reference book.
 

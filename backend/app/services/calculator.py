@@ -7,7 +7,14 @@ from typing import Any, Callable, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import AsutpFactorOption, AsutpModule, PriceIndex, ReferenceBook, ReferenceRow
+from app.models import (
+    AsutpFactorOption,
+    AsutpModule,
+    BookSectionShare,
+    PriceIndex,
+    ReferenceBook,
+    ReferenceRow,
+)
 
 ROMAN = {1: "I", 2: "II", 3: "III", 4: "IV"}
 STAGE_FACTORS = {"П": 0.4, "Р": 0.6, "П+Р": 1.0}
@@ -29,6 +36,36 @@ def _stage_splits_for_book(book, stage: str) -> list[tuple[str, float]]:
         "П":   [("ПД", pd)],
         "Р":   [("РД", rd)],
     }.get(stage, [("", 1.0)])
+
+
+def _norm_section_code(code: str) -> str:
+    """«ИОС.ЭС», «иос.эс», «ЭС» → «ЭС» — подраздел ИОС сверяется без префикса."""
+    return code.strip().upper().removeprefix("ИОС.").strip()
+
+
+def _section_shares(
+    db: Session, book_version_id: int, table_num: Optional[int], stage_label: str,
+) -> dict[str, tuple[str, str, float]]:
+    """Распределение стоимости по разделам для (книга, таблица, стадия).
+
+    Lookup: table-specific → book-wide (table_num IS NULL).
+    Returns {norm(code): (code, name, pct)}; пусто — распределение не загружено.
+    """
+    candidates = [table_num, None] if table_num is not None else [None]
+    for tn in candidates:
+        q = db.query(BookSectionShare).filter(
+            BookSectionShare.book_version_id == book_version_id,
+            BookSectionShare.stage == stage_label,
+        )
+        q = q.filter(BookSectionShare.table_num == tn) if tn is not None \
+            else q.filter(BookSectionShare.table_num.is_(None))
+        rows = q.all()
+        if rows:
+            return {
+                _norm_section_code(r.section_code): (r.section_code, r.section_name, float(r.pct))
+                for r in rows
+            }
+    return {}
 
 
 def _normalize_unit(u: str) -> str:
@@ -948,13 +985,52 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         if qty > 1:
             formula += f"*{qty}"
 
+        entity_sections = [
+            s.strip() for s in (entity.get("sections") or []) if s and s.strip()
+        ]
+
         stage_splits = _stage_splits_for_book(book, stage)
         for stage_label, stage_pct in stage_splits:
+            # Приоритет: явная дробь (pd/rd_sections_pct) → расчёт по кодам
+            # разделов из book_section_shares → 1.0 (полный состав)
             sect_pct = 1.0
+            sections_note = ""
+            explicit = None
             if stage_label == "ПД":
-                sect_pct = float(entity.get("pd_sections_pct") or 1.0)
+                explicit = entity.get("pd_sections_pct")
             elif stage_label == "РД":
-                sect_pct = float(entity.get("rd_sections_pct") or 1.0)
+                explicit = entity.get("rd_sections_pct")
+            if explicit:
+                sect_pct = float(explicit)
+            elif entity_sections and stage_label in ("ПД", "РД"):
+                shares = _section_shares(db, book.id, table_num, stage_label)
+                if shares:
+                    matched = [
+                        shares[_norm_section_code(s)]
+                        for s in entity_sections if _norm_section_code(s) in shares
+                    ]
+                    if matched:
+                        total = sum(p for _, _, p in matched)
+                        sect_pct = total / 100.0
+                        sections_note = (
+                            " + ".join(f"{c} {_fmt_ru(p)}%" for c, _, p in matched)
+                            + f" = {_fmt_ru(total)}%"
+                        )
+                    unmatched = [
+                        s for s in entity_sections if _norm_section_code(s) not in shares
+                    ]
+                    if unmatched:
+                        warnings.append(
+                            f"{object_name} [{stage_label}]: разделы {', '.join(unmatched)} "
+                            f"не найдены в распределении {book.code} "
+                            f"(табл. {table_num}) — их доля не учтена"
+                        )
+                else:
+                    warnings.append(
+                        f"{object_name} [{stage_label}]: состав разделов задан "
+                        f"({', '.join(entity_sections)}), но распределение стоимости "
+                        f"по разделам для {book.code} не загружено — считаем 100%"
+                    )
 
             combined_pct = stage_pct * sect_pct
             pos_cost_base = round(cost_base * combined_pct, 2)
@@ -966,6 +1042,10 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             if sect_pct != 1.0:
                 stage_formula += f"*{_fmt_ru(sect_pct)}"
 
+            stage_justification = justification
+            if sections_note:
+                stage_justification += f"; разделы {stage_label}: {sections_note}"
+
             positions.append({
                 "num":                 len(positions) + 1,
                 "name":                object_name,
@@ -973,7 +1053,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
                 "unit":                row_unit,
                 "quantity":            match.x_effective,
                 "item_count":          qty,
-                "justification":       justification,
+                "justification":       stage_justification,
                 "formula":             stage_formula,
                 "cost":                pos_cost,
                 "cost_base":           pos_cost_base,

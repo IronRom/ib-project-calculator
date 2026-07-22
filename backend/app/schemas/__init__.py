@@ -93,6 +93,10 @@ class ExtractedEntity(BaseModel):
     section_name: str = ""          # short stage name ≤60 chars, empty when section_num=0
     asutp_factors: Optional[dict[str, str]] = None  # Ф2→п.1.1, Ф5→п.2.2 etc. (СБЦП-22 only)
     asutp_k: float = 1.0                           # correction coefficient from СБЦП-22 table 3
+    sections: list[str] = []       # коды разрабатываемых разделов (ПЗ, АР, КР, …);
+                                   # пусто = полный состав. Сверяется с book_section_shares
+    pd_sections_pct: Optional[float] = None  # ручной оверрайд доли разделов ПД (0-1)
+    rd_sections_pct: Optional[float] = None  # ручной оверрайд доли разделов РД (0-1)
 
     @field_validator('x_unit', 'sbts_code', 'section_name', mode='before')
     @classmethod
