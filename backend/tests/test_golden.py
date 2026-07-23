@@ -420,3 +420,40 @@ def test_samolet_ls05_sbcp25(db):
                         abs_tol=0.5)
     assert math.isclose(by_name["ГВС"], 2200 * 1.2 * 7.1, abs_tol=0.5), by_name["ГВС"]
     assert math.isclose(by_name["Электросети"], 1200 * 1.127 * 7.1, abs_tol=0.5), by_name["Электросети"]
+
+
+# ── Котельная Сафоновское: НЗ-849 (2022) + НЗ-52-ГРС (2024) ──────────────
+
+def test_kotelnaya_nz849_nz52(db):
+    """[Котельная ЛС-01] п.4 ЦПУ/операторная по НЗ-849 т.3.8 и п.2 котельная
+    установка по НЗ-52 т.3.17 — копейка в копейку с эталоном.
+
+    ЦПУ 60 м³ (X<Xмин=100 → ф.8.2: 0,4×100+0,6×60=76), К=0,7:
+      (1007,2+1,085×76)×0,7×1,53×0,4 = 466 810,3 руб
+    Котельная установка 4 МВт: (2388,8+259,358×4)×1,27×0,4 = 1 740 525,9 руб
+    """
+    from app.models import BookObjectType, ReferenceBook
+
+    def tid(code, sub):
+        b = db.query(ReferenceBook).filter(ReferenceBook.code == code).first()
+        t = (db.query(BookObjectType)
+             .filter(BookObjectType.book_version_id == b.id,
+                     BookObjectType.name.like(f"%{sub}%")).first())
+        assert t, f"{code}: {sub}"
+        return t.id
+
+    r = calculate({"stage": "П", "region": "МО", "entities": [
+        _ent(object_name="ЦПУ", sbts_code="НЗ-2022-МС849", sbts_table=38,
+             sbts_object_type_id=tid("НЗ-2022-МС849", "Центральный пункт"),
+             x_value=60, x_unit="куб.м",
+             coefficients=[{"name": "modular_07", "value": 1.0}]),
+        _ent(object_name="Котельная установка", sbts_code="НЗ-2024-МС52-ГРС",
+             sbts_table=317,
+             sbts_object_type_id=tid("НЗ-2024-МС52-ГРС", "Котельная установка"),
+             x_value=4, x_unit="МВт"),
+    ]}, db)
+    assert not r["errors"], r["errors"]
+    by = {p["name"]: p["cost"] for p in r["positions"]}
+    assert math.isclose(by["ЦПУ"], 466_810.30, abs_tol=0.5), by["ЦПУ"]
+    assert math.isclose(by["Котельная установка"], 1_740_525.90, abs_tol=0.5), \
+        by["Котельная установка"]
