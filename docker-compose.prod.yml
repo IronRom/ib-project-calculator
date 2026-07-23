@@ -1,0 +1,48 @@
+# ПРОД (pir.i-build.tech): образы из GHCR, порты только на localhost,
+# postgres без публикации наружу. Деплой: .github/workflows/deploy.yml
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pir_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: pir_calc
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pir_user -d pir_calc"]
+      interval: 10s
+      retries: 10
+
+  backend:
+    image: ghcr.io/ironrom/ib-pir-backend:latest
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    environment:
+      DATABASE_URL: postgresql://pir_user:${DB_PASSWORD}@db:5432/pir_calc
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8010:8000"
+    volumes:
+      - uploads:/app/uploads
+
+  frontend:
+    image: ghcr.io/ironrom/ib-pir-frontend:latest
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: https://pir.i-build.tech/api
+    ports:
+      - "127.0.0.1:3010:3000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  uploads:

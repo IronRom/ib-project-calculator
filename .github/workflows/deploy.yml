@@ -1,0 +1,69 @@
+name: Deploy to prod (pir.i-build.tech)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-backend:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ghcr.io/ironrom/ib-pir-backend:latest
+            ghcr.io/ironrom/ib-pir-backend:${{ github.sha }}
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile.prod
+          push: true
+          tags: |
+            ghcr.io/ironrom/ib-pir-frontend:latest
+            ghcr.io/ironrom/ib-pir-frontend:${{ github.sha }}
+
+  deploy:
+    needs: [build-backend, build-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 85.198.98.132
+          username: deploy-pir
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/pir
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.prod.yml exec -T backend alembic upgrade head
+            docker image prune -f
+            curl -sf http://127.0.0.1:8010/openapi.json > /dev/null && echo "BACKEND OK"
+            curl -sf http://127.0.0.1:3010/login > /dev/null && echo "FRONTEND OK"
