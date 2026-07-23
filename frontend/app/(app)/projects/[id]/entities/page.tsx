@@ -3,12 +3,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
-  getCalculation, getProject, computeCalculation,
-  downloadExport2PS, downloadExportKP, patchEntity,
+  getCalculation, getProject, computeCalculation, patchEntity,
   getUnitCheck, startExtractionJob, getExtractionStatus, listCalculations,
   clarifyCalc, finalizeCalc, createVersion, downloadExportFile,
   Calculation, ExtractedEntity, CalculationResult,
-  CalcPosition, Project, UnitCheckItem, CalcListItem, ClarifyDiff,
+  Project, UnitCheckItem, CalcListItem, ClarifyDiff,
 } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
@@ -34,6 +33,9 @@ const EXPORT_LABELS: Record<string, string> = {
 function fmt(n: number): string {
   return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 }
+function fmtRub(n: number): string {
+  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n) + ' ₽'
+}
 
 // ── Local override types ──────────────────────────────────────────────────────
 interface EntityOverride {
@@ -44,26 +46,15 @@ interface EntityOverride {
   rd_sections_pct?: number | null
 }
 
-// ── Column width constants ────────────────────────────────────────────────────
-const COL_CAT   = '110px'
-const COL_TYPE  = '170px'
-const COL_NAME  = '200px'
-const COL_ADDR  = '140px'
-const COL_X     = '110px'
-const COL_UNIT  = '90px'
-const COL_XTBL  = '130px'
-const COL_CONF  = '80px'
-const COL_ACT   = '80px'
-
-function groupBySections(entities: ExtractedEntity[]) {
+function groupBySections(indices: number[], entities: ExtractedEntity[]) {
   const sections: Map<number, { name: string; indices: number[] }> = new Map()
-  entities.forEach((e, i) => {
+  indices.forEach((gi) => {
+    const e = entities[gi]
     const num = e.section_num ?? 0
     const name = e.section_name ?? ''
     if (!sections.has(num)) sections.set(num, { name, indices: [] })
-    sections.get(num)!.indices.push(i)
+    sections.get(num)!.indices.push(gi)
   })
-  // Staged groups (1,2,3...) first, ungrouped (0) last
   return Array.from(sections.entries()).sort(([a], [b]) => {
     if (a === 0) return 1
     if (b === 0) return -1
@@ -87,9 +78,11 @@ export default function CalcWorkspacePage() {
   const [unitChecks, setUnitChecks] = useState<UnitCheckItem[]>([])
   const [overrides, setOverrides]   = useState<Record<number, EntityOverride>>({})
   const [dirty, setDirty]           = useState(false)
+  const [tab, setTab]               = useState<'objects' | 'basis'>('objects')
+  // варнинги, исчезнувшие после пересчёта — показываем зачёркнутыми
+  const [resolvedWarnings, setResolvedWarnings] = useState<string[]>([])
 
   // AI-анализ ТЗ — фоновая задача на сервере, экран лишь опрашивает статус.
-  // Вкладку можно закрыть и вернуться позже.
   const [extracting, setExtracting]           = useState(false)
   const [extractProgress, setExtractProgress] = useState({ step: 0, total: 6, message: 'Инициализация…' })
   const [extractError, setExtractError]       = useState('')
@@ -188,8 +181,7 @@ export default function CalcWorkspacePage() {
         getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks).catch(() => {})
       } else if (m?.status !== 'final' && !extractStartedRef.current) {
         extractStartedRef.current = true
-        // анализ мог уже идти в фоне (запущен ранее / с другого устройства) —
-        // тогда просто продолжаем опрос, иначе стартуем новый
+        // анализ мог уже идти в фоне — тогда продолжаем опрос, иначе стартуем
         getExtractionStatus(Number(id), Number(calcId)).then((st) => {
           if (st.status === 'running') {
             if (st.progress) setExtractProgress(st.progress)
@@ -226,12 +218,23 @@ export default function CalcWorkspacePage() {
     setDirty(false)
   }
 
+  // пересчёт: варнинги, которых больше нет — в «решённые» (зачёркиваем)
+  function absorbResult(r: CalculationResult) {
+    const oldW = calcResult?.warnings ?? []
+    const curW = r.warnings ?? []
+    setResolvedWarnings(prev => {
+      const gone = oldW.filter(w => !curW.includes(w))
+      return Array.from(new Set([...prev.filter(w => !curW.includes(w)), ...gone]))
+    })
+    setCalcResult(r)
+  }
+
   async function handleCompute() {
     setComputing(true); setCalcError('')
     try {
       await savePendingOverrides()
       const r = await computeCalculation(Number(id), Number(calcId))
-      setCalcResult(r)
+      absorbResult(r)
       getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks)
       refreshMeta().catch(() => {})
     } catch (e: unknown) {
@@ -258,7 +261,7 @@ export default function CalcWorkspacePage() {
     setClarifyBusy(true); setCalcError('')
     try {
       const r = await clarifyCalc(Number(id), Number(calcId), clarifyText, false)
-      if (r.result) setCalcResult(r.result as CalculationResult)
+      if (r.result) absorbResult(r.result as CalculationResult)
       setClarifyDiff(null)
       setClarifyText('')
       const c = await getCalculation(Number(id), Number(calcId))
@@ -273,7 +276,7 @@ export default function CalcWorkspacePage() {
   }
 
   async function handleFinalize() {
-    if (!confirm('Финализировать расчёт? Версия будет заморожена — правки будут возможны только в новой версии. Будут сформированы файлы 2ПС и КП.')) return
+    if (!confirm('Применить и заморозить расчёт? Будут сформированы файлы 2ПС и КП; правки — только в новой версии.')) return
     setFinalizing(true); setCalcError('')
     try {
       await savePendingOverrides()
@@ -283,7 +286,7 @@ export default function CalcWorkspacePage() {
       setCalc(c)
       if (c.calculation_result) setCalcResult(c.calculation_result)
     } catch (e: unknown) {
-      setCalcError(e instanceof Error ? e.message : 'Ошибка финализации')
+      setCalcError(e instanceof Error ? e.message : 'Ошибка применения')
     } finally {
       setFinalizing(false)
     }
@@ -303,42 +306,65 @@ export default function CalcWorkspacePage() {
   const result   = calc?.extracted_entities
   const entities: ExtractedEntity[] = result?.entities ?? []
 
-  const th: React.CSSProperties = {
-    textAlign: 'left', padding: '9px 12px', fontSize: 11, fontWeight: 600,
-    color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.05em',
-    borderBottom: '1px solid var(--border-default)', whiteSpace: 'nowrap',
+  const effectiveX = (gi: number) => {
+    const ov = overrides[gi] ?? {}
+    return ov.x_value !== undefined ? ov.x_value : entities[gi]?.x_value
   }
-  const tdBase: React.CSSProperties = { padding: '10px 12px', fontSize: 13, verticalAlign: 'top' }
-  const tdMono: React.CSSProperties = { ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12 }
-
-  const obvious   = entities.filter((_, i) => (entities[i].confidence ?? 1) >= 0.7)
-  const suggested = entities.filter((_, i) => (entities[i].confidence ?? 1) < 0.7)
-
-  const colHeaders = ['Категория','Тип объекта','Наименование','Адрес','X (из ТЗ)','Ед.','X (таблица)','Увер.','']
-  const colWidths  = [COL_CAT, COL_TYPE, COL_NAME, COL_ADDR, COL_X, COL_UNIT, COL_XTBL, COL_CONF, COL_ACT]
-
-  function makeColGroup() {
-    return (
-      <colgroup>
-        {colWidths.map((w, i) => <col key={i} style={{ width: w }} />)}
-      </colgroup>
-    )
+  const isDeleted = (gi: number) => {
+    const ov = overrides[gi] ?? {}
+    return ov.deleted ?? entities[gi]?.deleted ?? false
   }
 
-  const theadRow = (
-    <tr>
-      {colHeaders.map((h, i) => (
-        <th key={i} style={{ ...th, width: colWidths[i] }}>{h}</th>
-      ))}
-    </tr>
-  )
+  const obviousIdx   = entities.map((_, i) => i).filter(i => (entities[i].confidence ?? 1) >= 0.7)
+  const suggestedIdx = entities.map((_, i) => i).filter(i => (entities[i].confidence ?? 1) < 0.7)
+
+  // цена позиции: сумма строк расчёта (ПД+РД) с num = глоб.индекс + 1
+  const costFor = (gi: number): number | null => {
+    if (!calcResult) return null
+    const rows = calcResult.positions.filter(p => p.num === gi + 1)
+    if (!rows.length) return null
+    return rows.reduce((s, p) => s + p.cost, 0)
+  }
+
+  // «Нет X: …» из ТЗ считаем решённым, когда у соответствующей позиции X заполнен
+  const missingItems = (result?.missing_data ?? []).map((m) => {
+    const resolved = entities.some((e, gi) =>
+      e.object_name && m.includes(e.object_name) && effectiveX(gi) != null && !isDeleted(gi))
+    return { text: m, resolved }
+  })
+
+  const curWarnings = calcResult?.warnings ?? []
+  const curErrors   = calcResult?.errors ?? []
+  const basisCount  = curWarnings.length + curErrors.length + missingItems.filter(m => !m.resolved).length
 
   const extractPct = extractProgress.total > 0 ? Math.round((extractProgress.step / extractProgress.total) * 100) : 0
+
+  const tabBtn = (key: 'objects' | 'basis', label: string, badge?: number) => (
+    <button
+      onClick={() => setTab(key)}
+      style={{
+        padding: '9px 16px', fontSize: 13, fontWeight: tab === key ? 600 : 400,
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        color: tab === key ? 'var(--fg-1)' : 'var(--fg-3)',
+        borderBottom: tab === key ? '2px solid var(--blue-500)' : '2px solid transparent',
+        display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+      {badge != null && badge > 0 && (
+        <span style={{
+          fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600,
+          background: 'var(--status-warning-bg)', color: 'var(--warning-400)',
+          border: '1px solid var(--warning-500)', borderRadius: 999, padding: '1px 7px',
+        }}>{badge}</span>
+      )}
+    </button>
+  )
 
   return (
     <>
       <Topbar
-        title={meta ? `Расчёт №${meta.id} · v${meta.version_num}` : 'Расчёт'}
+        title={meta ? `Расчёт №${meta.id}` : 'Расчёт'}
         breadcrumb={project ? `Проекты / ${project.name}` : 'Проекты'}
         actions={
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -353,13 +379,13 @@ export default function CalcWorkspacePage() {
           </div>
         }
       />
-      <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* Финализированный расчёт: файлы + новая версия */}
         {readOnly && meta && (
           <div style={{ padding: '14px 18px', background: 'var(--status-success-bg)', border: '1px solid var(--success-500)', borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--success-400)' }}>
-              ✓ Расчёт финализирован{meta.finalized_at ? ` ${new Date(meta.finalized_at).toLocaleString('ru-RU')}` : ''} — версия заморожена
+              ✓ Расчёт применён{meta.finalized_at ? ` ${new Date(meta.finalized_at).toLocaleString('ru-RU')}` : ''} — версия заморожена
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               {meta.exports.map((ex) => (
@@ -390,7 +416,7 @@ export default function CalcWorkspacePage() {
 
         {/* AI-анализ ТЗ: прогресс / ошибка */}
         {extracting && (
-          <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: '24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>AI-анализ технического задания</div>
               <div style={{ fontSize: 13, color: 'var(--fg-3)' }}>
@@ -420,207 +446,235 @@ export default function CalcWorkspacePage() {
           </div>
         )}
 
-        {/* Badges */}
-        {result && entities.length > 0 && (
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-            <ConfidenceBadge value={result.overall_confidence} />
-            {result.stage && <MetaBadge label="Стадия" value={result.stage} />}
-            {result.region && <MetaBadge label="Регион" value={result.region} />}
-            {dirty && (
-              <span style={{ fontSize: 12, color: 'var(--warning-400)', fontFamily: 'var(--font-mono)' }}>
-                ● несохранённые изменения
-              </span>
-            )}
-            {!readOnly && !extracting && (
-              <button
-                onClick={() => { if (confirm('Повторить AI-анализ ТЗ? Текущие позиции и правки будут заменены заново извлечёнными.')) startExtraction() }}
-                style={{ fontFamily: 'var(--font-mono)', fontSize: 11, padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'transparent', color: 'var(--fg-3)', border: '1px solid var(--border-default)' }}
-              >↻ повторить анализ ТЗ</button>
-            )}
-          </div>
-        )}
-
-        {/* Missing data banner */}
-        {result?.missing_data && result.missing_data.length > 0 && (
-          <div style={{ padding: '12px 16px', background: 'var(--status-warning-bg)', border: '1px solid var(--warning-500)', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--warning-400)', marginBottom: 6 }}>Не удалось определить из ТЗ:</div>
-            <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: 'var(--warning-400)' }}>
-              {result.missing_data.map((m, i) => <li key={i}>{m}</li>)}
-            </ul>
-          </div>
-        )}
-
-        {/* used_minimum warning banner */}
-        {calcResult && calcResult.positions.some(p => p.used_minimum) && (
-          <div style={{
-            background: 'var(--status-warning-bg)', border: '1px solid var(--warning-500)', borderRadius: 6,
-            padding: '8px 14px', fontSize: 13, color: 'var(--warning-400)',
-          }}>
-            ⚠️ Часть позиций рассчитана по минимальным значениям. Уточните параметры для точной стоимости.
-          </div>
-        )}
-
-        {/* Entities tables */}
-        {!extracting && !extractError && entities.length === 0 ? (
+        {!extracting && !extractError && entities.length === 0 && (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
             AI не смог извлечь объекты из ТЗ.
           </div>
-        ) : entities.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Obvious */}
-            <EntityTable
-              title="Объекты ПИР"
-              entities={entities}
-              subset={obvious}
-              unitChecks={unitChecks}
-              overrides={overrides}
-              onOverride={applyOverride}
-              theadRow={theadRow}
-              makeColGroup={makeColGroup}
-              calcResult={calcResult}
-              readOnly={readOnly}
-            />
-            {/* Suggested */}
-            {suggested.length > 0 && (
-              <EntityTable
-                title="Предложено AI — требует проверки"
-                subtitle="Позиции нормативно обязательны, но прямо не указаны в ТЗ"
-                entities={entities}
-                subset={suggested}
-                unitChecks={unitChecks}
-                overrides={overrides}
-                onOverride={applyOverride}
-                theadRow={theadRow}
-                makeColGroup={makeColGroup}
-                calcResult={calcResult}
-                readOnly={readOnly}
-                warn
-              />
-            )}
-          </div>
         )}
 
-        {/* Уточнение свободным текстом (AI-патч с предпросмотром) */}
-        {!readOnly && entities.length > 0 && (
-          <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Уточнение расчёта</div>
-              <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 2 }}>
-                Опишите правку свободным текстом — AI изменит позиции, вы увидите изменения до применения
-              </div>
-            </div>
-            <textarea
-              value={clarifyText}
-              onChange={e => { setClarifyText(e.target.value); setClarifyDiff(null) }}
-              placeholder="Например: «мощность котельной 2 МВт, а не 4», «убери АСУТП», «добавь наружное освещение 1,2 км»"
-              rows={2}
-              style={{
-                padding: '8px 10px', fontSize: 13,
-                border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
-                resize: 'vertical', fontFamily: 'inherit', color: 'var(--fg-1)',
-                background: 'var(--bg-input)',
-              }}
-            />
-            {clarifyDiff ? (
-              <div style={{ border: '1px solid var(--blue-700)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-                <div style={{ padding: '10px 14px', background: 'var(--accent-tint)', fontSize: 13, fontWeight: 600, color: 'var(--blue-300)' }}>
-                  Предпросмотр изменений
-                </div>
-                <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {clarifyDiff.summary && (
-                    <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>{clarifyDiff.summary}</div>
-                  )}
-                  {clarifyDiff.changes?.length > 0 && (
-                    <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: 'var(--fg-2)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      {clarifyDiff.changes.map((ch, i) => (
-                        <li key={i}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', marginRight: 6 }}>
-                            {ch.type === 'add' ? '+ добавить' : ch.type === 'remove' ? '− убрать' : '± изменить'}
-                          </span>
-                          {ch.object_name}
-                          {ch.field && (
-                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>
-                              {' '}· {ch.field}: {String(ch.old ?? '—')} → {String(ch.new ?? '—')}
-                            </span>
-                          )}
-                          {ch.reason && <span style={{ color: 'var(--fg-3)' }}> — {ch.reason}</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {(clarifyDiff.total_before != null || clarifyDiff.total_after != null) && (
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-1)' }}>
-                      Итог с НДС: {clarifyDiff.total_before != null ? fmt(clarifyDiff.total_before) : '—'} → <strong>{clarifyDiff.total_after != null ? fmt(clarifyDiff.total_after) : '—'}</strong> ₽
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                    <Button variant="primary" size="sm" disabled={clarifyBusy} onClick={handleClarifyApply}>
-                      {clarifyBusy ? 'Применение…' : 'Применить и пересчитать'}
-                    </Button>
-                    <Button variant="ghost" size="sm" disabled={clarifyBusy} onClick={() => setClarifyDiff(null)}>
-                      Отмена
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div>
-                <Button variant="secondary" size="sm" disabled={clarifyBusy || !clarifyText.trim()} onClick={handleClarifyPreview}>
-                  {clarifyBusy ? 'AI анализирует…' : 'Предпросмотр изменений'}
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Рассчитать / статус */}
-        {!readOnly && entities.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <Button variant="primary" disabled={computing || !calcId} onClick={handleCompute}>
-              {computing ? 'Расчёт…' : calcResult ? 'Пересчитать' : 'Рассчитать стоимость ПИР'}
-            </Button>
-            {dirty && !computing && (
-              <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Нажмите, чтобы применить изменения</span>
-            )}
-          </div>
-        )}
         {calcError && (
           <div style={{ padding: '10px 14px', background: 'var(--danger-100)', border: '1px solid var(--danger-500)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--danger-400)' }}>
             {calcError}
           </div>
         )}
 
-        {/* Результат: ошибки, предупреждения, 2ПС, финализация */}
-        {calcResult && (
+        {entities.length > 0 && (
           <>
-            {calcResult.errors.length > 0 && (
-              <div style={{ padding: '12px 16px', background: 'var(--status-warning-bg)', border: '1px solid var(--warning-500)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--warning-400)' }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>Не найдены данные для позиций:</div>
-                {calcResult.errors.map((e, i) => <div key={i} style={{ marginLeft: 12 }}>• {e}</div>)}
-              </div>
-            )}
-            {(calcResult.warnings?.length ?? 0) > 0 && (
-              <div style={{ padding: '12px 16px', background: 'var(--status-warning-bg)', border: '1px solid var(--warning-500)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--warning-400)' }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>⚠ Предупреждения расчёта (влияют на точность цены):</div>
-                {calcResult.warnings!.map((w, i) => <div key={i} style={{ marginLeft: 12 }}>• {w}</div>)}
-              </div>
-            )}
-            <ResultTable result={calcResult} tdBase={tdBase} tdMono={tdMono} th={th} />
-            {calcId && !readOnly && (
-              <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-                <Button variant="primary" disabled={finalizing || computing || dirty} onClick={handleFinalize}>
-                  {finalizing ? 'Финализация…' : '✓ Финализировать расчёт'}
-                </Button>
-                <Button variant="secondary" onClick={() => downloadExport2PS(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
-                  ↓ 2ПС ИР (черновик)
-                </Button>
-                <Button variant="secondary" onClick={() => downloadExportKP(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
-                  ↓ КП (черновик)
-                </Button>
+            {/* Вкладки */}
+            <div style={{ borderBottom: 'var(--hairline)', display: 'flex', gap: 4, overflowX: 'auto' }}>
+              {tabBtn('objects', 'Объекты ПИР')}
+              {tabBtn('basis', 'Обоснование', basisCount)}
+            </div>
+
+            {/* ═══ Вкладка «Объекты ПИР» ═══ */}
+            {tab === 'objects' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {dirty && (
-                  <span style={{ fontSize: 12, color: 'var(--warning-400)' }}>
-                    Сначала пересчитайте — есть несохранённые изменения
-                  </span>
+                  <div style={{ fontSize: 12, color: 'var(--warning-400)', fontFamily: 'var(--font-mono)' }}>
+                    ● есть изменения — нажмите «Пересчитать»
+                  </div>
+                )}
+
+                {/* Основные позиции по этапам */}
+                {groupBySections(obviousIdx, entities).map(([sectionNum, { name, indices }]) => (
+                  <React.Fragment key={`s${sectionNum}`}>
+                    {sectionNum > 0 && (
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--blue-300)', marginTop: 4 }}>
+                        Этап {sectionNum}{name ? `: ${name}` : ''}
+                      </div>
+                    )}
+                    {indices.map(gi => (
+                      <EntityCard
+                        key={gi}
+                        num={gi + 1}
+                        entity={entities[gi]}
+                        unitCheck={unitChecks[gi]}
+                        override={overrides[gi] ?? {}}
+                        deleted={isDeleted(gi)}
+                        cost={costFor(gi)}
+                        stage={result?.stage}
+                        readOnly={readOnly}
+                        onOverride={(patch) => applyOverride(gi, patch)}
+                      />
+                    ))}
+                  </React.Fragment>
+                ))}
+
+                {/* Предложено AI */}
+                {suggestedIdx.length > 0 && (
+                  <>
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--warning-400)' }}>
+                        Предложено AI — требует проверки
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 2 }}>
+                        Позиции нормативно обязательны, но прямо не указаны в ТЗ
+                      </div>
+                    </div>
+                    {suggestedIdx.map(gi => (
+                      <EntityCard
+                        key={gi}
+                        num={gi + 1}
+                        entity={entities[gi]}
+                        unitCheck={unitChecks[gi]}
+                        override={overrides[gi] ?? {}}
+                        deleted={isDeleted(gi)}
+                        cost={costFor(gi)}
+                        stage={result?.stage}
+                        readOnly={readOnly}
+                        warn
+                        onOverride={(patch) => applyOverride(gi, patch)}
+                      />
+                    ))}
+                  </>
+                )}
+
+                {/* Итог */}
+                {calcResult && (
+                  <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <TotalRow label="Базовая стоимость" value={fmt(calcResult.base_cost)} />
+                    <TotalRow label={`Индекс пересчёта (${calcResult.price_index_period})`} value={`× ${calcResult.price_index}`} />
+                    {calcResult.stage_factor !== 1 && (
+                      <TotalRow label={`Доля стадии ${calcResult.stage}`} value={`× ${calcResult.stage_factor}`} />
+                    )}
+                    <TotalRow label={`НДС ${calcResult.vat_rate}%`} value={fmt(calcResult.vat_amount)} />
+                    <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>ИТОГО с НДС</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 700, color: 'var(--fg-1)' }}>
+                        {fmtRub(calcResult.total_with_vat)}
+                      </span>
+                    </div>
+                    {basisCount > 0 && (
+                      <button onClick={() => setTab('basis')} style={{
+                        alignSelf: 'flex-start', marginTop: 2, background: 'transparent', border: 'none',
+                        cursor: 'pointer', fontSize: 12, color: 'var(--warning-400)', padding: 0, textDecoration: 'underline',
+                      }}>
+                        {basisCount} замечаний к расчёту — открыть «Обоснование»
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Уточнение */}
+                {!readOnly && (
+                  <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>Комментарий / уточнение</div>
+                    <textarea
+                      value={clarifyText}
+                      onChange={e => { setClarifyText(e.target.value); setClarifyDiff(null) }}
+                      placeholder="Например: «ячеек 21 шт», «кабельные линии 300 п.м», «убери АСУТП»"
+                      rows={2}
+                      style={{
+                        padding: '8px 10px', fontSize: 13,
+                        border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
+                        resize: 'vertical', fontFamily: 'inherit', color: 'var(--fg-1)',
+                        background: 'var(--bg-input)',
+                      }}
+                    />
+                    {clarifyDiff ? (
+                      <div style={{ border: '1px solid var(--blue-700)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                        <div style={{ padding: '8px 12px', background: 'var(--accent-tint)', fontSize: 13, fontWeight: 600, color: 'var(--blue-300)' }}>
+                          Что изменится
+                        </div>
+                        <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {clarifyDiff.summary && <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>{clarifyDiff.summary}</div>}
+                          {clarifyDiff.changes?.length > 0 && (
+                            <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: 'var(--fg-2)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {clarifyDiff.changes.map((ch, i) => (
+                                <li key={i}>
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', marginRight: 6 }}>
+                                    {ch.type === 'add' ? '+ добавить' : ch.type === 'remove' ? '− убрать' : '± изменить'}
+                                  </span>
+                                  {ch.object_name}
+                                  {ch.field && (
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>
+                                      {' '}· {ch.field}: {String(ch.old ?? '—')} → {String(ch.new ?? '—')}
+                                    </span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {(clarifyDiff.total_before != null || clarifyDiff.total_after != null) && (
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                              Итог: {clarifyDiff.total_before != null ? fmtRub(clarifyDiff.total_before) : '—'} → <strong>{clarifyDiff.total_after != null ? fmtRub(clarifyDiff.total_after) : '—'}</strong>
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
+                            <Button variant="primary" size="sm" disabled={clarifyBusy} onClick={handleClarifyApply}>
+                              {clarifyBusy ? 'Применение…' : 'Применить уточнение'}
+                            </Button>
+                            <Button variant="ghost" size="sm" disabled={clarifyBusy} onClick={() => setClarifyDiff(null)}>
+                              Отмена
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <Button variant="secondary" size="sm" disabled={clarifyBusy || !clarifyText.trim()} onClick={handleClarifyPreview}>
+                          {clarifyBusy ? 'AI анализирует…' : 'Проверить уточнение'}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Действия */}
+                {!readOnly && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', paddingBottom: 8 }}>
+                    <Button variant={calcResult ? 'secondary' : 'primary'} disabled={computing || finalizing} onClick={handleCompute}>
+                      {computing ? 'Расчёт…' : calcResult ? '↻ Пересчитать' : 'Рассчитать'}
+                    </Button>
+                    {calcResult && (
+                      <Button variant="primary" disabled={finalizing || computing} onClick={handleFinalize}>
+                        {finalizing ? 'Применение…' : '✓ Применить'}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ═══ Вкладка «Обоснование» ═══ */}
+            {tab === 'basis' && result && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <MetaBadge label="Уверенность AI" value={`${Math.round((result.overall_confidence ?? 0) * 100)}%`} />
+                  {result.stage && <MetaBadge label="Стадия" value={result.stage} />}
+                  {result.region && <MetaBadge label="Регион" value={result.region} />}
+                  {calcResult && <MetaBadge label="Индекс" value={`${calcResult.price_index} (${calcResult.price_index_period})`} />}
+                </div>
+
+                {curErrors.length > 0 && (
+                  <BasisBlock title="Не найдены данные для позиций" tone="danger">
+                    {curErrors.map((e, i) => <BasisItem key={i} text={e} tone="danger" />)}
+                  </BasisBlock>
+                )}
+
+                {missingItems.length > 0 && (
+                  <BasisBlock title="Не удалось определить из ТЗ" tone="warning">
+                    {missingItems.map((m, i) => (
+                      <BasisItem key={i} text={m.text} tone="warning" resolved={m.resolved}
+                                 resolvedNote="указано вручную" />
+                    ))}
+                  </BasisBlock>
+                )}
+
+                {(curWarnings.length > 0 || resolvedWarnings.length > 0) && (
+                  <BasisBlock title="Предупреждения расчёта" tone="warning">
+                    {curWarnings.map((w, i) => <BasisItem key={`c${i}`} text={w} tone="warning" />)}
+                    {resolvedWarnings.map((w, i) => (
+                      <BasisItem key={`r${i}`} text={w} tone="warning" resolved
+                                 resolvedNote="устранено после пересчёта" />
+                    ))}
+                  </BasisBlock>
+                )}
+
+                {basisCount === 0 && resolvedWarnings.length === 0 && (
+                  <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
+                    Замечаний нет — расчёт без предупреждений.
+                  </div>
                 )}
               </div>
             )}
@@ -631,408 +685,229 @@ export default function CalcWorkspacePage() {
   )
 }
 
-// ── Entity table block ────────────────────────────────────────────────────────
-function EntityTable({
-  title, subtitle, entities, subset, unitChecks, overrides, onOverride, theadRow, makeColGroup, calcResult, readOnly, warn,
-}: {
-  title: string; subtitle?: string; entities: ExtractedEntity[]; subset: ExtractedEntity[]
-  unitChecks: UnitCheckItem[]; overrides: Record<number, EntityOverride>
-  onOverride: (idx: number, patch: Partial<EntityOverride>) => void
-  theadRow: React.ReactNode; makeColGroup: () => React.ReactNode
-  calcResult: CalculationResult | null; readOnly: boolean; warn?: boolean
-}) {
-  const borderColor = warn ? 'var(--warning-500)' : 'var(--border-default)'
-
-  // Build section groups from the subset (using global indices into entities array)
-  const subsetGlobalIndices = subset.map(e => entities.indexOf(e))
-  const subsetEntitiesForGrouping = subsetGlobalIndices.map(gi => entities[gi])
-  // groupBySections uses array index relative to subsetEntitiesForGrouping,
-  // so we need a mapping back to global indices
-  const sections = groupBySections(subsetEntitiesForGrouping)
-  const hasMultipleSections = sections.some(([num]) => num > 0)
-
-  // Column count for colSpan (9 columns total)
-  const COL_COUNT = 9
-
-  return (
-    <div style={{ background: 'var(--bg-elevated)', border: `1px solid ${borderColor}`, borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-      <div style={{ padding: '14px 18px', borderBottom: `1px solid ${borderColor}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: warn ? 'var(--status-warning-bg)' : undefined }}>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: warn ? 'var(--warning-400)' : undefined }}>{title}</div>
-          {subtitle && <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 2 }}>{subtitle}</div>}
-        </div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: warn ? 'var(--warning-400)' : 'var(--fg-3)' }}>{subset.length} позиций</div>
-      </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-          {makeColGroup()}
-          <thead style={{ background: 'var(--bg-raised)' }}>{theadRow}</thead>
-          <tbody>
-            {sections.map(([sectionNum, { name, indices: localIndices }]) => {
-              // localIndices are offsets into subsetEntitiesForGrouping; map to global entity indices
-              const globalIndices = localIndices.map(li => subsetGlobalIndices[li])
-              const sectionEntities = globalIndices.map(gi => entities[gi])
-
-              // Compute per-section subtotal from calcResult positions (pos.num is 1-based global index)
-              const sectionCost = calcResult
-                ? globalIndices
-                    .map(gi => calcResult.positions.find(p => p.num === gi + 1)?.cost ?? 0)
-                    .reduce((s, v) => s + v, 0)
-                : 0
-
-              return (
-                <React.Fragment key={`section-${sectionNum}`}>
-                  {/* Section header row */}
-                  {hasMultipleSections && (
-                    <tr>
-                      <td colSpan={COL_COUNT} style={{
-                        background: 'var(--accent-tint)', padding: '6px 12px',
-                        fontWeight: 600, fontSize: 13, color: 'var(--blue-300)',
-                        borderTop: '2px solid var(--blue-500)',
-                      }}>
-                        {sectionNum === 0 ? 'Без этапа' : `Этап ${sectionNum}${name ? `: ${name}` : ''}`}
-                      </td>
-                    </tr>
-                  )}
-
-                  {/* Entity rows for this section */}
-                  {sectionEntities.map((entity, i) => {
-                    const globalIdx = globalIndices[i]
-                    const ov = overrides[globalIdx] ?? {}
-                    const isDeleted = ov.deleted ?? entity.deleted ?? false
-                    // isLast only matters for border; use section subtotal row as visual separator
-                    const isLastOverall = !hasMultipleSections && globalIdx === subsetGlobalIndices[subsetGlobalIndices.length - 1]
-                    return (
-                      <EntityRow
-                        key={globalIdx}
-                        entity={entity}
-                        unitCheck={unitChecks[globalIdx]}
-                        isLast={hasMultipleSections ? false : isLastOverall}
-                        override={ov}
-                        isDeleted={isDeleted}
-                        stage={calcResult?.stage ?? 'П+Р'}
-                        readOnly={readOnly}
-                        onOverride={(patch) => onOverride(globalIdx, patch)}
-                      />
-                    )
-                  })}
-
-                  {/* Section subtotal row */}
-                  {hasMultipleSections && sectionNum > 0 && sectionCost > 0 && (
-                    <tr style={{ background: 'var(--bg-raised)' }}>
-                      <td colSpan={COL_COUNT - 1} style={{ padding: '4px 12px', textAlign: 'right', fontSize: 12, color: 'var(--fg-3)' }}>
-                        Итог этапа:
-                      </td>
-                      <td style={{ padding: '4px 12px', textAlign: 'right', fontWeight: 600, fontSize: 12 }}>
-                        {fmt(sectionCost)}
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-// ── Single entity row ─────────────────────────────────────────────────────────
-function EntityRow({ entity, unitCheck, isLast, override, isDeleted, stage, readOnly, onOverride }: {
+// ── Карточка позиции ──────────────────────────────────────────────────────────
+function EntityCard({ num, entity, unitCheck, override, deleted, cost, stage, readOnly, warn, onOverride }: {
+  num: number
   entity: ExtractedEntity
-  unitCheck?: UnitCheckItem; isLast: boolean
-  override: EntityOverride; isDeleted: boolean
+  unitCheck?: UnitCheckItem
+  override: EntityOverride
+  deleted: boolean
+  cost: number | null
   stage?: string
   readOnly: boolean
+  warn?: boolean
   onOverride: (patch: Partial<EntityOverride>) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [inputVal, setInputVal] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
-  const showStagePct = stage === 'П+Р' && !isDeleted
 
-  const effectiveX    = override.x_value !== undefined ? override.x_value : entity.x_value
-  const effectiveUnit = override.x_unit  !== undefined ? override.x_unit  : entity.x_unit
-  const xMissing      = effectiveX == null
+  const effX    = override.x_value !== undefined ? override.x_value : entity.x_value
+  const effUnit = override.x_unit  !== undefined ? override.x_unit  : entity.x_unit
+  const xMissing = effX == null
 
   const tone  = CATEGORY_TONES[entity.category] || 'default'
   const label = CATEGORY_LABELS[entity.category] || entity.category
+  const strike: React.CSSProperties = deleted ? { textDecoration: 'line-through', opacity: 0.5 } : {}
 
-  const strikeStyle: React.CSSProperties = isDeleted ? { textDecoration: 'line-through', opacity: 0.45 } : {}
+  const showPct = stage === 'П+Р' && !deleted
+  const pdPct = override.pd_sections_pct ?? entity.pd_sections_pct ?? null
+  const rdPct = override.rd_sections_pct ?? entity.rd_sections_pct ?? null
 
   function startEdit() {
-    if (readOnly) return
-    setInputVal(effectiveX != null ? String(effectiveX).replace('.', ',') : '')
+    if (readOnly || deleted) return
+    setInputVal(effX != null ? String(effX).replace('.', ',') : '')
     setEditing(true)
     setTimeout(() => inputRef.current?.focus(), 0)
   }
-
   function commitEdit() {
-    const num = parseFloat(inputVal.replace(',', '.'))
-    if (!isNaN(num)) onOverride({ x_value: num })
+    const n = parseFloat(inputVal.replace(',', '.'))
+    if (!isNaN(n)) onOverride({ x_value: n })
     setEditing(false)
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Enter')  { commitEdit(); return }
-    if (e.key === 'Escape') { setEditing(false) }
-  }
-
-  // X (таблица) cell
-  let unitCell: React.ReactNode = <span style={{ color: 'var(--fg-4)', fontSize: 11 }}>—</span>
-  if (unitCheck) {
-    if (!unitCheck.ok) {
-      unitCell = <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--danger-400)', wordBreak: 'break-word' }}>⚠ {unitCheck.note}</span>
-    } else if (unitCheck.note) {
-      const xEff = unitCheck.x_effective?.toLocaleString('ru-RU', { maximumFractionDigits: 4 }) ?? ''
-      unitCell = (
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: unitCheck.extrapolated ? 'var(--warning-400)' : 'var(--success-400)' }}>
-          {xEff} {unitCheck.x_unit_table}
-          {unitCheck.extrapolated && <span style={{ marginLeft: 4, fontSize: 10 }}>экстрап.</span>}
-        </span>
-      )
-    } else {
-      unitCell = <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--success-400)' }}>✓</span>
-    }
-  }
-
-  // X (из ТЗ) cell — editable in draft
-  const xCell = editing ? (
-    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-      <input
-        ref={inputRef}
-        value={inputVal}
-        onChange={e => setInputVal(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onBlur={commitEdit}
-        style={{ width: 74, fontFamily: 'var(--font-mono)', fontSize: 12, padding: '3px 6px', background: 'var(--bg-default)', border: '1px solid var(--accent-500)', borderRadius: 4, color: 'var(--fg-1)', outline: 'none', textAlign: 'right' }}
-        placeholder="0.0"
-      />
-    </div>
-  ) : (
-    <div
-      onClick={(isDeleted || readOnly) ? undefined : startEdit}
-      title={xMissing ? (entity.x_value_missing_reason ?? 'Не указано в ТЗ') : readOnly ? undefined : 'Нажмите для редактирования'}
-      style={{
-        cursor: (isDeleted || readOnly) ? 'default' : 'pointer',
-        display: 'block', width: '100%', textAlign: 'right',
-        fontFamily: 'var(--font-mono)', fontSize: 12,
-        padding: '3px 8px', borderRadius: 4,
-        background: xMissing ? 'color-mix(in srgb, var(--warning-500) 15%, transparent)' : 'transparent',
-        border: xMissing ? '1px solid var(--warning-500)' : '1px solid transparent',
-        color: xMissing ? 'var(--warning-400)' : 'inherit',
-        boxSizing: 'border-box',
-        ...strikeStyle,
-      }}
-    >
-      {xMissing ? '⚠ —' : effectiveX!.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
-    </div>
-  )
-
-  const hasPct = showStagePct
-  const pdPct = override.pd_sections_pct ?? entity.pd_sections_pct ?? null
-  const rdPct = override.rd_sections_pct ?? entity.rd_sections_pct ?? null
-  const hasFooter = !!(entity.notes || entity.tz_quote || (xMissing && entity.x_value_missing_reason) || hasPct)
-  const rowBg = isDeleted ? 'color-mix(in srgb, var(--danger-500) 8%, transparent)' : undefined
-
   return (
-    <>
-      <tr style={{ borderBottom: (isLast && !hasFooter) ? 'none' : 'var(--hairline)', background: rowBg }}>
-        <td style={{ padding: '10px 12px', ...strikeStyle }}><Chip tone={tone}>{label}</Chip></td>
-        <td style={{ padding: '10px 12px', fontWeight: 500, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...strikeStyle }}>{entity.object_type}</td>
-        <td style={{ padding: '10px 12px', color: 'var(--fg-2)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...strikeStyle }}>{entity.object_name}</td>
-        <td style={{ padding: '10px 12px', color: 'var(--fg-3)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...strikeStyle }}>{entity.address || '—'}</td>
-        <td style={{ padding: '10px 12px', textAlign: 'right' }}>{xCell}</td>
-        <td style={{ padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', ...strikeStyle }}>{effectiveUnit || '—'}</td>
-        <td style={{ padding: '10px 12px' }}>{unitCell}</td>
-        <td style={{ padding: '10px 12px' }}><ConfidenceBadge value={entity.confidence ?? 0} small /></td>
-        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-          {readOnly ? null : isDeleted ? (
-            <button
-              onClick={() => onOverride({ deleted: false })}
-              style={{ fontSize: 11, padding: '3px 8px', background: 'transparent', border: '1px solid var(--fg-3)', borderRadius: 4, color: 'var(--fg-3)', cursor: 'pointer' }}
+    <div style={{
+      background: deleted ? 'color-mix(in srgb, var(--danger-500) 6%, var(--bg-elevated))' : 'var(--bg-elevated)',
+      border: warn ? '1px solid var(--warning-500)' : 'var(--hairline)',
+      borderRadius: 'var(--radius-lg)', padding: '12px 14px',
+      display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0,
+    }}>
+      {/* строка 1: номер + чипы + удалить */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)' }}>№{num}</span>
+        <Chip tone={tone}>{label}</Chip>
+        {(entity.confidence ?? 1) < 0.7 && <Chip tone="warning">AI {Math.round((entity.confidence ?? 0) * 100)}%</Chip>}
+        <span style={{ flex: 1 }} />
+        {!readOnly && (
+          deleted ? (
+            <button onClick={() => onOverride({ deleted: false })}
+              style={{ fontSize: 11, padding: '3px 10px', background: 'transparent', border: '1px solid var(--fg-3)', borderRadius: 4, color: 'var(--fg-3)', cursor: 'pointer', whiteSpace: 'nowrap' }}
             >↩ вернуть</button>
           ) : (
-            <button
-              onClick={() => onOverride({ deleted: true })}
-              style={{ fontSize: 11, padding: '3px 8px', background: 'transparent', border: '1px solid var(--danger-400)', borderRadius: 4, color: 'var(--danger-400)', cursor: 'pointer' }}
-            >удалить</button>
-          )}
-        </td>
-      </tr>
-      {hasFooter && (
-        <tr style={{ borderBottom: isLast ? 'none' : 'var(--hairline)', background: rowBg }}>
-          <td colSpan={9} style={{ padding: '2px 12px 8px 12px' }}>
+            <button onClick={() => onOverride({ deleted: true })} title="Удалить позицию"
+              style={{ fontSize: 13, padding: '2px 9px', background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 4, color: 'var(--fg-3)', cursor: 'pointer' }}
+            >×</button>
+          )
+        )}
+      </div>
+
+      {/* строка 2: цена слева + название */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 700, color: cost != null ? 'var(--fg-1)' : 'var(--fg-4)', whiteSpace: 'nowrap', ...strike }}>
+          {deleted ? '—' : cost != null ? fmtRub(cost) : '· · ·'}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 600, minWidth: 0, ...strike }}>{entity.object_type}</span>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--fg-3)', ...strike }}>
+        {entity.object_name}{entity.address ? ` · ${entity.address}` : ''}
+      </div>
+
+      {/* строка 3: X */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>X:</span>
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={inputVal}
+            onChange={e => setInputVal(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditing(false) }}
+            onBlur={commitEdit}
+            inputMode="decimal"
+            style={{ width: 90, fontFamily: 'var(--font-mono)', fontSize: 13, padding: '4px 8px', background: 'var(--bg-input)', border: '1px solid var(--border-focus)', borderRadius: 4, color: 'var(--fg-1)', outline: 'none' }}
+            placeholder="0,0"
+          />
+        ) : (
+          <span
+            onClick={startEdit}
+            title={xMissing ? (entity.x_value_missing_reason ?? 'Не указано в ТЗ') : readOnly ? undefined : 'Нажмите для редактирования'}
+            style={{
+              cursor: (readOnly || deleted) ? 'default' : 'pointer',
+              fontFamily: 'var(--font-mono)', fontSize: 13,
+              padding: '3px 10px', borderRadius: 4,
+              background: xMissing ? 'color-mix(in srgb, var(--warning-500) 15%, transparent)' : 'var(--bg-raised)',
+              border: xMissing ? '1px solid var(--warning-500)' : '1px solid var(--border-subtle)',
+              color: xMissing ? 'var(--warning-400)' : 'var(--fg-1)',
+              ...strike,
+            }}
+          >
+            {xMissing ? '⚠ указать' : effX!.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+          </span>
+        )}
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{effUnit || ''}</span>
+        {unitCheck && (
+          !unitCheck.ok ? (
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--danger-400)' }}>⚠ {unitCheck.note}</span>
+          ) : unitCheck.note ? (
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: unitCheck.extrapolated ? 'var(--warning-400)' : 'var(--success-400)' }}>
+              → {unitCheck.x_effective?.toLocaleString('ru-RU', { maximumFractionDigits: 4 })} {unitCheck.x_unit_table}
+              {unitCheck.extrapolated ? ' (экстрап.)' : ''}
+            </span>
+          ) : (
+            <span style={{ fontSize: 11, color: 'var(--success-400)' }}>✓</span>
+          )
+        )}
+      </div>
+
+      {/* проценты разделов (только П+Р) */}
+      {showPct && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--fg-3)', fontWeight: 600 }}>Разделы %:</span>
+          {(['ПД', 'РД'] as const).map((lbl) => {
+            const field = lbl === 'ПД' ? 'pd_sections_pct' : 'rd_sections_pct'
+            const val = lbl === 'ПД' ? pdPct : rdPct
+            return (
+              <label key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                <span style={{ color: 'var(--fg-3)' }}>{lbl}</span>
+                <input
+                  type="number" min={0} max={100} step={0.5} placeholder="100"
+                  disabled={readOnly}
+                  value={val != null ? Math.round(val * 100) : ''}
+                  onChange={e => {
+                    const n = parseFloat(e.target.value)
+                    onOverride({ [field]: isNaN(n) ? null : n / 100 } as Partial<EntityOverride>)
+                  }}
+                  style={{
+                    width: 56, fontFamily: 'var(--font-mono)', fontSize: 12,
+                    padding: '2px 6px', background: 'var(--bg-input)',
+                    border: '1px solid var(--border-default)', borderRadius: 4,
+                    color: 'var(--fg-1)', outline: 'none', textAlign: 'right',
+                  }}
+                />
+                <span style={{ color: 'var(--fg-3)' }}>%</span>
+              </label>
+            )
+          })}
+        </div>
+      )}
+
+      {/* подробности: цитата ТЗ + примечания — свёрнуты, чтобы не сливалось */}
+      {(entity.tz_quote || entity.notes || (xMissing && entity.x_value_missing_reason)) && (
+        <details style={{ fontSize: 12 }}>
+          <summary style={{ cursor: 'pointer', color: 'var(--fg-4)', fontSize: 11, userSelect: 'none' }}>
+            подробности из ТЗ
+          </summary>
+          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
             {xMissing && entity.x_value_missing_reason && (
-              <div style={{ fontSize: 11, color: 'var(--warning-400)', marginBottom: 2, ...strikeStyle }}>⚠ {entity.x_value_missing_reason}</div>
+              <div style={{ color: 'var(--warning-400)', fontSize: 11 }}>⚠ {entity.x_value_missing_reason}</div>
             )}
             {entity.tz_quote && (
-              <div style={{ fontSize: 11, color: 'var(--fg-4)', fontFamily: 'var(--font-mono)', marginBottom: entity.notes ? 2 : 0, ...strikeStyle }}>
+              <div style={{ color: 'var(--fg-4)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
                 <span style={{ color: 'var(--fg-3)', marginRight: 4 }}>ТЗ:</span>«{entity.tz_quote}»
               </div>
             )}
-            {entity.notes && (
-              <div style={{ fontSize: 12, color: 'var(--fg-3)', fontStyle: 'italic', ...strikeStyle }}>{entity.notes}</div>
-            )}
-            {hasPct && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 6, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, color: 'var(--fg-3)', fontWeight: 600 }}>Разделы %:</span>
-                {(['ПД', 'РД'] as const).map((lbl) => {
-                  const field = lbl === 'ПД' ? 'pd_sections_pct' : 'rd_sections_pct'
-                  const val = lbl === 'ПД' ? pdPct : rdPct
-                  return (
-                    <label key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
-                      <span style={{
-                        padding: '1px 5px', borderRadius: 3, fontSize: 10, fontWeight: 700,
-                        background: lbl === 'ПД' ? 'var(--accent-tint)' : 'var(--bg-raised)',
-                        color: lbl === 'ПД' ? 'var(--blue-300)' : 'var(--fg-2)',
-                        border: '1px solid var(--border-default)',
-                      }}>{lbl}</span>
-                      <input
-                        type="number"
-                        min={0} max={100} step={0.5}
-                        placeholder="100"
-                        disabled={readOnly}
-                        value={val != null ? Math.round(val * 100) : ''}
-                        onChange={e => {
-                          const n = parseFloat(e.target.value)
-                          onOverride({ [field]: isNaN(n) ? null : n / 100 } as Partial<EntityOverride>)
-                        }}
-                        style={{
-                          width: 56, fontFamily: 'var(--font-mono)', fontSize: 12,
-                          padding: '2px 5px', background: 'var(--bg-default)',
-                          border: '1px solid var(--border-default)', borderRadius: 4,
-                          color: 'var(--fg-1)', outline: 'none', textAlign: 'right',
-                        }}
-                      />
-                      <span style={{ color: 'var(--fg-3)', fontSize: 11 }}>%</span>
-                    </label>
-                  )
-                })}
-                <span style={{ fontSize: 11, color: 'var(--fg-4)' }}>
-                  {pdPct != null || rdPct != null
-                    ? `ПД×${((pdPct ?? 1) * 0.4 * 100).toFixed(1)}% + РД×${((rdPct ?? 1) * 0.6 * 100).toFixed(1)}% от базы`
-                    : 'по умолчанию: ПД 40% + РД 60%'}
-                </span>
-              </div>
-            )}
-          </td>
-        </tr>
+            {entity.notes && <div style={{ color: 'var(--fg-3)', fontStyle: 'italic' }}>{entity.notes}</div>}
+          </div>
+        </details>
       )}
-    </>
+    </div>
   )
 }
 
-// ── 2ПС result table ──────────────────────────────────────────────────────────
-function ResultTable({ result, tdBase, tdMono, th }: { result: CalculationResult; tdBase: React.CSSProperties; tdMono: React.CSSProperties; th: React.CSSProperties }) {
+// ── Итоговая строка ───────────────────────────────────────────────────────────
+function TotalRow({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-      <div style={{ padding: '14px 20px', borderBottom: 'var(--hairline)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>Форма 2ПС ИР — Сметный расчёт</div>
-          <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 3, fontFamily: 'var(--font-mono)' }}>
-            Стадия: {result.stage} · Индекс: {result.price_index} ({result.price_index_period})
-          </div>
-        </div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13, color: 'var(--fg-2)', flexWrap: 'wrap' }}>
+      <span>{label}</span>
+      <span style={{ fontFamily: 'var(--font-mono)' }}>{value}</span>
+    </div>
+  )
+}
+
+// ── Блоки вкладки «Обоснование» ───────────────────────────────────────────────
+function BasisBlock({ title, tone, children }: { title: string; tone: 'warning' | 'danger'; children: React.ReactNode }) {
+  const color = tone === 'danger' ? 'var(--danger-400)' : 'var(--warning-400)'
+  const border = tone === 'danger' ? 'var(--danger-500)' : 'var(--warning-500)'
+  return (
+    <div style={{ border: `1px solid ${border}`, borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+      <div style={{ padding: '10px 14px', fontSize: 13, fontWeight: 600, color, borderBottom: `1px solid ${border}` }}>
+        {title}
       </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-          <colgroup>
-            <col style={{ width: 36 }} />
-            <col style={{ width: '14%' }} />
-            <col style={{ width: '22%' }} />
-            <col style={{ width: 80 }} />
-            <col style={{ width: 70 }} />
-            <col style={{ width: '22%' }} />
-            <col style={{ width: '20%' }} />
-            <col style={{ width: 140 }} />
-          </colgroup>
-          <thead style={{ background: 'var(--bg-raised)' }}>
-            <tr>
-              <th style={{ ...th, textAlign: 'center' }}>№</th>
-              <th style={th}>Наименование работ</th>
-              <th style={th}>Тип работ по справочнику</th>
-              <th style={{ ...th, textAlign: 'center' }}>Ед. изм.</th>
-              <th style={{ ...th, textAlign: 'right' }}>Кол-во</th>
-              <th style={th}>Обоснование стоимости</th>
-              <th style={th}>Расчёт стоимости</th>
-              <th style={{ ...th, textAlign: 'right' }}>Стоимость, руб.</th>
-            </tr>
-            <tr style={{ background: 'var(--bg-raised)' }}>
-              {[1,2,3,4,5,6,7,8].map(n => (
-                <td key={n} style={{ ...tdMono, color: 'var(--fg-3)', textAlign: 'center', borderBottom: '1px solid var(--border-default)', paddingTop: 3, paddingBottom: 6, fontSize: 11 }}>{n}</td>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {result.positions.map((pos: CalcPosition, i: number) => (
-              <tr key={i} style={{ borderTop: 'var(--hairline)' }}>
-                <td style={{ ...tdMono, color: 'var(--fg-3)', textAlign: 'center' }}>{pos.num}</td>
-                <td style={{ ...tdBase, fontSize: 13 }}>
-                  {pos.stage_label && (
-                    <span style={{
-                      display: 'inline-block', marginRight: 5,
-                      padding: '1px 5px', borderRadius: 3, fontSize: 10, fontWeight: 700,
-                      background: pos.stage_label === 'ПД' ? 'var(--accent-tint)' : 'var(--bg-raised)',
-                      color: pos.stage_label === 'ПД' ? 'var(--blue-300)' : 'var(--fg-2)',
-                      border: '1px solid var(--border-default)',
-                    }}>{pos.stage_label}</span>
-                  )}
-                  {pos.name}
-                </td>
-                <td style={{ ...tdBase, fontSize: 12, color: 'var(--fg-2)' }}>{pos.row_description}</td>
-                <td style={{ ...tdMono, textAlign: 'center', color: 'var(--fg-2)' }}>{pos.unit}</td>
-                <td style={{ ...tdMono, textAlign: 'right' }}>{pos.quantity}</td>
-                <td style={{ ...tdBase, fontSize: 11, color: 'var(--fg-3)' }}>{pos.justification}</td>
-                <td style={{ ...tdMono, fontSize: 11, color: 'var(--fg-2)', wordBreak: 'break-all' }}>{pos.formula}</td>
-                <td style={{ ...tdMono, textAlign: 'right', fontWeight: 600 }}>
-                  {pos.used_minimum && (
-                    <span
-                      title="Рассчитано по минимальному X. Уточните параметры для точного расчёта."
-                      style={{
-                        display: 'inline-block', marginRight: 4,
-                        background: 'var(--status-warning-bg)', color: 'var(--warning-400)',
-                        border: '1px solid var(--warning-500)', borderRadius: 4,
-                        fontSize: 10, padding: '1px 5px', fontWeight: 600,
-                        verticalAlign: 'middle',
-                      }}
-                    >
-                      Минимум
-                    </span>
-                  )}
-                  {fmt(pos.cost)}
-                </td>
-              </tr>
-            ))}
-            <tr><td colSpan={8} style={{ height: 1, background: 'var(--border-strong)', padding: 0 }} /></tr>
-            <SummaryRow cols={8} label="Базовая стоимость основных проектных работ" value={fmt(result.base_cost)} bold note="МУ №620 п.2.1.1" />
-            <SummaryRow cols={8} label={`Коэффициент пересчёта на ${result.price_index_period}`} value={String(result.price_index)} note={result.price_index_justification} />
-            <SummaryRow cols={8} label="Текущая стоимость основных проектных работ" value={fmt(result.current_cost)} bold note="МУ №620 п.2.2.3" />
-            {result.stage_factor !== 1 && <>
-              <SummaryRow cols={8} label={`Доля стоимости (стадия ${result.stage})`} value={String(result.stage_factor)} />
-              <SummaryRow cols={8} label={`Итого с долей К=${result.stage_factor}`} value={fmt(result.cost_with_stage)} bold />
-            </>}
-            <SummaryRow cols={8} label={`НДС ${result.vat_rate}%`} value={fmt(result.vat_amount)} />
-            <SummaryRow cols={8} label="ИТОГО с НДС" value={fmt(result.total_with_vat)} bold />
-          </tbody>
-        </table>
+      <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {children}
       </div>
     </div>
   )
 }
 
-function SummaryRow({ cols, label, value, bold, note }: { cols: number; label: string; value: string; bold?: boolean; note?: string }) {
+function BasisItem({ text, tone, resolved, resolvedNote }: {
+  text: string; tone: 'warning' | 'danger'; resolved?: boolean; resolvedNote?: string
+}) {
+  const color = tone === 'danger' ? 'var(--danger-400)' : 'var(--warning-400)'
   return (
-    <tr>
-      <td colSpan={cols - 1} style={{ padding: '10px 12px', fontSize: 13, fontWeight: bold ? 600 : 400, color: 'var(--fg-2)' }}>
-        {label}
-        {note && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', marginLeft: 8 }}>{note}</span>}
-      </td>
-      <td style={{ padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: bold ? 700 : 400, textAlign: 'right', whiteSpace: 'nowrap', color: bold ? 'var(--fg-1)' : 'var(--fg-2)' }}>
-        {value}
-      </td>
-    </tr>
+    <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+      <span style={{
+        color: resolved ? 'var(--fg-4)' : color,
+        textDecoration: resolved ? 'line-through' : 'none',
+      }}>
+        {text}
+      </span>
+      {resolved && resolvedNote && (
+        <span style={{ color: 'var(--success-400)', marginLeft: 8, fontSize: 11, whiteSpace: 'nowrap' }}>
+          ✓ {resolvedNote}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -1040,18 +915,6 @@ function MetaBadge({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ padding: '6px 12px', background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-md)', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--fg-2)' }}>
       {label}: <strong style={{ color: 'var(--fg-1)' }}>{value}</strong>
-    </div>
-  )
-}
-
-function ConfidenceBadge({ value, small }: { value: number; small?: boolean }) {
-  const pct  = Math.round(value * 100)
-  const tone = pct >= 80 ? 'success' : pct >= 60 ? 'warning' : 'danger'
-  if (small) return <Chip tone={tone}>{pct}%</Chip>
-  return (
-    <div style={{ padding: '8px 14px', background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-md)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Уверенность AI:</span>
-      <Chip tone={tone}>{pct}%</Chip>
     </div>
   )
 }
