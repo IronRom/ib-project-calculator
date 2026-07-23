@@ -16,10 +16,13 @@ export default function AdminSettingsPage() {
   const [models, setModels] = useState<OpenRouterModel[]>([])
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [modelsError, setModelsError] = useState(false)
 
   useEffect(() => {
     getAdminSettings().then(setSettings).catch(() => {})
-    listOpenRouterModels().then(setModels).catch(() => {})
+    listOpenRouterModels()
+      .then((ms) => { setModels(ms); setModelsError(ms.length === 0) })
+      .catch(() => setModelsError(true))
   }, [])
 
   async function save() {
@@ -45,6 +48,18 @@ export default function AdminSettingsPage() {
           fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: 1,
           color: 'var(--fg-3)',
         }}>МОДЕЛИ AI · ПРИМЕНЯЮТСЯ КО ВСЕМ НОВЫМ ОПЕРАЦИЯМ · TEMPERATURE=0</div>
+        {modelsError && (
+          <div style={{
+            padding: '12px 16px', borderRadius: 'var(--radius-md)', fontSize: 13,
+            background: 'rgba(217,119,6,0.10)', border: '1px solid var(--warning-500)',
+            color: 'var(--warning-400)', lineHeight: 1.6,
+          }}>
+            Список моделей OpenRouter недоступен с этого сервера (гео-блок «Access
+            denied by security policy»). Идентификаторы можно ввести вручную —
+            но AI-операции заработают только после настройки прокси
+            (OPENROUTER_PROXY в /opt/pir/.env).
+          </div>
+        )}
         {KEYS.map(({ key, label, hint }) => (
           <div key={key} style={{
             background: 'var(--bg-elevated)', border: 'var(--hairline)',
@@ -53,21 +68,33 @@ export default function AdminSettingsPage() {
           }}>
             <div style={{ fontSize: 14, fontWeight: 600 }}>{label}</div>
             <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>{hint}</div>
-            <select
-              value={settings[key] || ''}
-              onChange={(e) => setSettings((s) => ({ ...s, [key]: e.target.value }))}
-              style={{
-                background: 'var(--bg-input)', border: 'var(--hairline)',
-                borderRadius: 'var(--radius-md)', padding: '8px 10px',
-                fontSize: 12, color: 'var(--fg-1)', fontFamily: 'var(--font-mono)',
-              }}>
-              {settings[key] && !models.find((m) => m.id === settings[key]) && (
-                <option value={settings[key]}>{settings[key]}</option>
-              )}
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>{m.id}</option>
-              ))}
-            </select>
+            {models.length > 0 ? (
+              <select
+                value={settings[key] || ''}
+                onChange={(e) => setSettings((s) => ({ ...s, [key]: e.target.value }))}
+                style={{
+                  background: 'var(--bg-input)', border: 'var(--hairline)',
+                  borderRadius: 'var(--radius-md)', padding: '8px 10px',
+                  fontSize: 12, color: 'var(--fg-1)', fontFamily: 'var(--font-mono)',
+                }}>
+                {settings[key] && !models.find((m) => m.id === settings[key]) && (
+                  <option value={settings[key]}>{settings[key]}</option>
+                )}
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.id}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={settings[key] || ''}
+                onChange={(e) => setSettings((s) => ({ ...s, [key]: e.target.value }))}
+                placeholder="например: qwen/qwen3.7-plus"
+                style={{
+                  background: 'var(--bg-input)', border: 'var(--hairline)',
+                  borderRadius: 'var(--radius-md)', padding: '8px 10px',
+                  fontSize: 12, color: 'var(--fg-1)', fontFamily: 'var(--font-mono)',
+                }} />
+            )}
           </div>
         ))}
       </div>
