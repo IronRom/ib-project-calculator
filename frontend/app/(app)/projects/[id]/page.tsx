@@ -274,8 +274,11 @@ export default function ProjectPage() {
           <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Анализ через OpenRouter</div>
             {orModels.length === 0 ? (
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-3)' }}>
-                Добавьте <code>OPENROUTER_API_KEY</code> в <code>.env</code> и перезапустите backend
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--warning-400)', lineHeight: 1.6 }}>
+                Список моделей OpenRouter недоступен: либо не задан OPENROUTER_API_KEY,
+                либо OpenRouter блокирует IP сервера (403 «security policy») — тогда
+                нужен прокси: OPENROUTER_PROXY в .env. Расчёт запустится с моделью
+                по умолчанию из настроек администратора.
               </div>
             ) : (
               <>
