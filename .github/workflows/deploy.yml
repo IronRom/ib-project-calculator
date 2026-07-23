@@ -54,7 +54,7 @@ jobs:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1
         with:
-          host: 85.198.98.132
+          host: 155.212.230.118
           username: deploy-pir
           key: ${{ secrets.PROD_SSH_KEY }}
           script: |
