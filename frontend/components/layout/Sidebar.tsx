@@ -12,6 +12,7 @@ const ADMIN_ITEMS = [
   { href: '/admin/users', label: 'Пользователи', icon: '👤' },
   { href: '/admin/references', label: 'Справочники', icon: '📚' },
   { href: '/admin/indices', label: 'Коэффициенты', icon: '📊' },
+  { href: '/admin/settings', label: 'Настройки', icon: '⚙' },
 ]
 
 interface SidebarProps {

@@ -580,3 +580,58 @@ export interface PriceIndex {
   index_value: number
   source_ref: string
 }
+
+// ═══ Жизненный цикл расчёта (версии / уточнения / финализация) ═══════════
+
+export interface CalcListItem {
+  id: number
+  version_num: number
+  parent_id: number | null
+  status: 'draft' | 'final'
+  created_at: string
+  finalized_at: string | null
+  n_entities: number
+  total_with_vat: number | null
+  exports: { kind: string; filename: string; id: number }[]
+  clarifications: { id: number; text: string; created_at: string; summary: string }[]
+}
+
+export function listCalculations(projectId: number) {
+  return request<CalcListItem[]>(`/projects/${projectId}/calculations`)
+}
+
+export function createVersion(projectId: number, calcId: number) {
+  return request<{ id: number; version_num: number; parent_id: number }>(
+    `/projects/${projectId}/calculations/${calcId}/versions`, { method: 'POST' })
+}
+
+export interface ClarifyDiff {
+  summary: string
+  changes: { type: string; index?: number; object_name: string; field?: string; old?: unknown; new?: unknown; reason?: string }[]
+  total_before: number | null
+  total_after: number | null
+}
+
+export function clarifyCalc(projectId: number, calcId: number, text: string, preview: boolean) {
+  return request<{ preview: boolean; diff: ClarifyDiff; result?: unknown }>(
+    `/projects/${projectId}/calculations/${calcId}/clarify`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, preview }) })
+}
+
+export function finalizeCalc(projectId: number, calcId: number) {
+  return request<{ status: string; total_with_vat: number; exports: { kind: string; filename: string }[]; warnings: string[] }>(
+    `/projects/${projectId}/calculations/${calcId}/finalize`, { method: 'POST' })
+}
+
+export function exportDownloadUrl(projectId: number, calcId: number, kind: string) {
+  return `${BASE}/projects/${projectId}/calculations/${calcId}/exports/${kind}/download`
+}
+
+export function getAdminSettings() {
+  return request<Record<string, string>>(`/admin/settings`)
+}
+
+export function putAdminSettings(body: Record<string, string>) {
+  return request<Record<string, string>>(`/admin/settings`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+}

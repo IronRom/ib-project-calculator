@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { getProject, startCalculation, uploadFile, deleteFile, getMe, listOpenRouterModels, Project, ProjectFile, OpenRouterModel } from '@/lib/api'
+import { getProject, startCalculation, uploadFile, deleteFile, getMe, listOpenRouterModels, listCalculations, createVersion, exportDownloadUrl, Project, ProjectFile, OpenRouterModel, CalcListItem } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
@@ -25,12 +25,14 @@ export default function ProjectPage() {
   const [orModels, setOrModels] = useState<OpenRouterModel[]>([])
   const [orModel, setOrModel] = useState('')
   const [orCalculating, setOrCalculating] = useState(false)
+  const [calcs, setCalcs] = useState<CalcListItem[]>([])
 
   useEffect(() => {
     Promise.all([getProject(Number(id)), getMe()]).then(([proj, user]) => {
       setProject(proj)
       setCanCalculate(user.can_calculate || user.role === 'admin')
     })
+    listCalculations(Number(id)).then(setCalcs).catch(() => {})
     listOpenRouterModels().then((models) => {
       setOrModels(models)
       if (models.length > 0) setOrModel(models[0].id)
@@ -101,7 +103,7 @@ export default function ProjectPage() {
               disabled={!canCalculate || project.files.length === 0 || calculating || orCalculating}
               onClick={() => handleCalculate()}
             >
-              {calculating ? 'Запуск…' : 'Рассчитать (Claude)'}
+              {calculating ? 'Запуск…' : '+ Новый расчёт'}
             </Button>
           </div>
         }
@@ -110,6 +112,93 @@ export default function ProjectPage() {
         {error && (
           <div style={{ padding: '10px 14px', background: 'var(--danger-100)', border: '1px solid var(--danger-500)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--danger-400)' }}>
             {error}
+          </div>
+        )}
+
+        {/* Расчёты проекта: версии, статусы, файлы финала */}
+        {calcs.length > 0 && (
+          <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px', borderBottom: 'var(--hairline)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>Расчёты</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{calcs.length} версий</div>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <tbody>
+                {calcs.map((c, i) => {
+                  const final = c.status === 'final'
+                  const kindIcon: Record<string, string> = { '2ps_xlsx': '2ПС', kp_pdf: 'PDF', kp_docx: 'DOC' }
+                  return (
+                    <tr key={c.id}
+                        style={{ borderBottom: i < calcs.length - 1 ? 'var(--hairline)' : 'none', cursor: 'pointer' }}
+                        onClick={() => router.push(final ? `/projects/${id}/results?calc=${c.id}` : `/projects/${id}/entities?calc=${c.id}`)}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+                      <td style={{ padding: '12px 18px', width: 90, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-2)' }}>
+                        v{c.version_num}·№{c.id}
+                      </td>
+                      <td style={{ padding: '12px 8px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-3)' }}>
+                        {new Date(c.created_at).toLocaleDateString('ru-RU')}
+                      </td>
+                      <td style={{ padding: '12px 8px' }}>
+                        {final
+                          ? <Chip tone="success">Расчёт окончен</Chip>
+                          : <Chip tone="warning">Не подтверждён</Chip>}
+                      </td>
+                      <td style={{ padding: '12px 8px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-1)', textAlign: 'right' }}>
+                        {c.total_with_vat != null ? c.total_with_vat.toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' ₽' : '—'}
+                      </td>
+                      <td style={{ padding: '12px 18px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {final ? (
+                          <span style={{ display: 'inline-flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                            {c.exports.map((ex) => (
+                              <button key={ex.kind}
+                                 onClick={async () => {
+                                   const r = await fetch(exportDownloadUrl(Number(id), c.id, ex.kind), {
+                                     headers: { Authorization: `Bearer ${localStorage.getItem('pir_token')}` },
+                                   })
+                                   const blob = await r.blob()
+                                   const a = document.createElement('a')
+                                   a.href = URL.createObjectURL(blob)
+                                   a.download = ex.filename
+                                   a.click()
+                                   URL.revokeObjectURL(a.href)
+                                 }}
+                                 title={ex.filename}
+                                 style={{
+                                   fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: 0.5,
+                                   padding: '4px 8px', borderRadius: 4, cursor: 'pointer',
+                                   background: 'var(--success-100)', color: 'var(--success-400)',
+                                   border: '1px solid var(--success-500)',
+                                 }}>
+                                ↓ {kindIcon[ex.kind] || ex.kind}
+                              </button>
+                            ))}
+                            <button
+                              onClick={async () => {
+                                const v = await createVersion(Number(id), c.id)
+                                const fresh = await listCalculations(Number(id))
+                                setCalcs(fresh)
+                                router.push(`/projects/${id}/entities?calc=${v.id}`)
+                              }}
+                              title="Создать новую версию для правок"
+                              style={{
+                                fontFamily: 'var(--font-mono)', fontSize: 10, padding: '4px 8px',
+                                borderRadius: 4, cursor: 'pointer',
+                                background: 'transparent', color: 'var(--fg-3)',
+                                border: '1px solid var(--border-default)',
+                              }}>⎇ версия</button>
+                          </span>
+                        ) : (
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)' }}>
+                            открыть →
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
 

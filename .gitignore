@@ -18,3 +18,4 @@ ib_calculator.dump
 
 # TypeScript build cache
 frontend/tsconfig.tsbuildinfo
+docker-compose.override.yml
