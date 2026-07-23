@@ -565,6 +565,13 @@ ws-черновиков старых СБЦП. Точные коды из эта
   CalculationOut не менялся; хелпер downloadExportFile в lib/api.ts
 - Известный грабель: dev-фронт в docker не видит правки bind mount (webpack-кэш) —
   лечится очисткой содержимого .next + docker compose restart frontend
+- ЭКСТРАКЦИЯ УШЛА В ФОН (миграция f2a3b4c5d6e7): calculations.extraction_status/
+  progress/error/started_at; POST /{calc}/extract → asyncio.create_task,
+  GET /{calc}/extraction-status — фронт опрашивает раз в 2,5 с, вкладку можно
+  закрывать (мобильный Safari убивал SSE вместе с анализом). running старше
+  30 мин = утеряно (рестарт бэкенда) → error с предложением перезапуска.
+  /stream оставлен на бэке, но фронтом НЕ используется. Плитка расчёта
+  показывает «идёт анализ ТЗ…» (extraction_status в listCalculations)
 
 ### 2026-07-23 (пятнадцатая сессия — переезд прода на 155.212.230.118)
 - Причина: OpenRouter гео-блокировал старый IP 85.198.98.132 (403 security

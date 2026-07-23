@@ -244,6 +244,11 @@ class Calculation(Base):
     status = Column(String(10), nullable=False, default="draft")  # draft | final
     version_num = Column(Integer, nullable=False, default=1)
     finalized_at = Column(DateTime, nullable=True)
+    # Фоновая AI-экстракция ТЗ: клиент опрашивает статус, вкладку можно закрыть
+    extraction_status = Column(String(10), nullable=False, default="idle")  # idle | running | done | error
+    extraction_progress = Column(JSONB, nullable=True)  # {step, total, message}
+    extraction_error = Column(Text, nullable=True)
+    extraction_started_at = Column(DateTime, nullable=True)
 
     project = relationship("Project", back_populates="calculations")
     book = relationship("ReferenceBook")

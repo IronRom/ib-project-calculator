@@ -92,6 +92,21 @@ export function getCalculation(projectId: number, calcId: number) {
   return request<Calculation>(`/projects/${projectId}/calculations/${calcId}`)
 }
 
+export interface ExtractionStatus {
+  status: 'idle' | 'running' | 'done' | 'error'
+  progress: { step: number; total: number; message: string } | null
+  error: string | null
+}
+
+export function startExtractionJob(projectId: number, calcId: number) {
+  return request<{ status: string; progress: ExtractionStatus['progress'] }>(
+    `/projects/${projectId}/calculations/${calcId}/extract`, { method: 'POST' })
+}
+
+export function getExtractionStatus(projectId: number, calcId: number) {
+  return request<ExtractionStatus>(`/projects/${projectId}/calculations/${calcId}/extraction-status`)
+}
+
 export function streamExtraction(projectId: number, calcId: number, model?: string): EventSource {
   const token = getToken()
   const params = new URLSearchParams()
@@ -585,6 +600,7 @@ export interface CalcListItem {
   created_at: string
   finalized_at: string | null
   n_entities: number
+  extraction_status?: 'idle' | 'running' | 'done' | 'error'
   total_with_vat: number | null
   exports: { kind: string; filename: string; id: number }[]
   clarifications: { id: number; text: string; created_at: string; summary: string }[]

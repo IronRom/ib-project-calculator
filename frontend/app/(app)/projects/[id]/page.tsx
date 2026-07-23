@@ -290,7 +290,9 @@ function CalcTile({ calc: c, num, onOpen, onDownload, onNewVersion }: {
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 600, color: c.total_with_vat != null ? 'var(--fg-1)' : 'var(--fg-4)' }}>
         {c.total_with_vat != null
           ? c.total_with_vat.toLocaleString('ru-RU', { maximumFractionDigits: 0 }) + ' ₽'
-          : '—'}
+          : c.extraction_status === 'running'
+            ? <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--blue-300)' }}>⟳ идёт анализ ТЗ…</span>
+            : '—'}
       </div>
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 'auto' }} onClick={(e) => e.stopPropagation()}>

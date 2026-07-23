@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
   getCalculation, getProject, computeCalculation,
   downloadExport2PS, downloadExportKP, patchEntity,
-  getUnitCheck, streamExtraction, listCalculations,
+  getUnitCheck, startExtractionJob, getExtractionStatus, listCalculations,
   clarifyCalc, finalizeCalc, createVersion, downloadExportFile,
   Calculation, ExtractedEntity, CalculationResult,
   CalcPosition, Project, UnitCheckItem, CalcListItem, ClarifyDiff,
@@ -88,12 +88,13 @@ export default function CalcWorkspacePage() {
   const [overrides, setOverrides]   = useState<Record<number, EntityOverride>>({})
   const [dirty, setDirty]           = useState(false)
 
-  // AI-анализ ТЗ (SSE) прямо на этом экране
+  // AI-анализ ТЗ — фоновая задача на сервере, экран лишь опрашивает статус.
+  // Вкладку можно закрыть и вернуться позже.
   const [extracting, setExtracting]           = useState(false)
   const [extractProgress, setExtractProgress] = useState({ step: 0, total: 3, message: 'Инициализация…' })
   const [extractError, setExtractError]       = useState('')
   const extractStartedRef = useRef(false)
-  const esRef = useRef<EventSource | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Уточнение свободным текстом (предпросмотр диффа → применение)
   const [clarifyText, setClarifyText] = useState('')
@@ -111,41 +112,61 @@ export default function CalcWorkspacePage() {
     return m
   }, [id, calcId])
 
-  const startExtraction = useCallback(() => {
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = null
+  }, [])
+
+  const finishExtraction = useCallback(async () => {
+    const c = await getCalculation(Number(id), Number(calcId))
+    setCalc(c)
+    // свежая экстракция: локальные правки и старый результат больше не актуальны
+    const init: Record<number, EntityOverride> = {}
+    ;(c.extracted_entities?.entities ?? []).forEach((e: ExtractedEntity, i: number) => {
+      if (e.deleted) init[i] = { deleted: true }
+    })
+    setOverrides(init)
+    setDirty(false)
+    setCalcResult(c.calculation_result ?? null)
+    setExtracting(false)
+    getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks).catch(() => {})
+  }, [id, calcId])
+
+  const beginPolling = useCallback(() => {
+    stopPolling()
+    setExtracting(true)
+    setExtractError('')
+    pollRef.current = setInterval(async () => {
+      try {
+        const st = await getExtractionStatus(Number(id), Number(calcId))
+        if (st.progress) setExtractProgress(st.progress)
+        if (st.status === 'done') {
+          stopPolling()
+          await finishExtraction()
+        } else if (st.status === 'error') {
+          stopPolling()
+          setExtractError(st.error || 'Ошибка AI-анализа ТЗ. Попробуйте ещё раз.')
+          setExtracting(false)
+        }
+      } catch {
+        // сеть мигнула — продолжаем опрос
+      }
+    }, 2500)
+  }, [id, calcId, stopPolling, finishExtraction])
+
+  const startExtraction = useCallback(async () => {
     setExtracting(true)
     setExtractError('')
     setExtractProgress({ step: 0, total: 3, message: 'Инициализация…' })
-    esRef.current?.close()
-    const es = streamExtraction(Number(id), Number(calcId))
-    esRef.current = es
-    es.addEventListener('progress', (e) => {
-      setExtractProgress(JSON.parse((e as MessageEvent).data))
-    })
-    es.addEventListener('done', async () => {
-      es.close()
-      const c = await getCalculation(Number(id), Number(calcId))
-      setCalc(c)
-      // свежая экстракция: локальные правки и старый результат больше не актуальны
-      const init: Record<number, EntityOverride> = {}
-      ;(c.extracted_entities?.entities ?? []).forEach((e: ExtractedEntity, i: number) => {
-        if (e.deleted) init[i] = { deleted: true }
-      })
-      setOverrides(init)
-      setDirty(false)
-      setCalcResult(c.calculation_result ?? null)
+    try {
+      const r = await startExtractionJob(Number(id), Number(calcId))
+      if (r.progress) setExtractProgress(r.progress)
+      beginPolling()
+    } catch (e: unknown) {
+      setExtractError(e instanceof Error ? e.message : 'Не удалось запустить анализ ТЗ')
       setExtracting(false)
-      getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks).catch(() => {})
-    })
-    es.addEventListener('error', (e) => {
-      es.close()
-      try {
-        setExtractError(JSON.parse((e as MessageEvent).data).message)
-      } catch {
-        setExtractError('Ошибка AI-анализа ТЗ. Попробуйте ещё раз.')
-      }
-      setExtracting(false)
-    })
-  }, [id, calcId])
+    }
+  }, [id, calcId, beginPolling])
 
   useEffect(() => {
     if (!calcId) return
@@ -166,12 +187,22 @@ export default function CalcWorkspacePage() {
       if (hasEntities) {
         getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks).catch(() => {})
       } else if (m?.status !== 'final' && !extractStartedRef.current) {
-        // новый расчёт: сразу запускаем AI-анализ ТЗ
         extractStartedRef.current = true
-        startExtraction()
+        // анализ мог уже идти в фоне (запущен ранее / с другого устройства) —
+        // тогда просто продолжаем опрос, иначе стартуем новый
+        getExtractionStatus(Number(id), Number(calcId)).then((st) => {
+          if (st.status === 'running') {
+            if (st.progress) setExtractProgress(st.progress)
+            beginPolling()
+          } else if (st.status === 'error') {
+            setExtractError(st.error || 'Ошибка AI-анализа ТЗ. Попробуйте ещё раз.')
+          } else {
+            startExtraction()
+          }
+        }).catch(() => startExtraction())
       }
     }).finally(() => setLoading(false))
-    return () => esRef.current?.close()
+    return () => stopPolling()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, calcId])
 
@@ -369,7 +400,12 @@ export default function CalcWorkspacePage() {
             <div style={{ background: 'var(--bg-raised)', borderRadius: 'var(--radius-full)', height: 6, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${extractPct}%`, background: 'var(--accent)', borderRadius: 'var(--radius-full)', transition: 'width 0.3s ease' }} />
             </div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-3)', textAlign: 'right' }}>{extractPct}%</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>
+                Анализ выполняется на сервере — страницу можно закрыть и вернуться позже
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-3)' }}>{extractPct}%</div>
+            </div>
           </div>
         )}
         {extractError && !extracting && (

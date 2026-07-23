@@ -142,6 +142,129 @@ async def stream_extraction(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+# ── Фоновая AI-экстракция ТЗ ─────────────────────────────────────────────────
+# Анализ живёт в процессе бэкенда, а не в HTTP-соединении: мобильный клиент
+# может закрыть вкладку/погасить экран и вернуться позже. Прогресс — в БД.
+
+_EXTRACTION_STALE_MIN = 30  # running старше этого — считаем задачу утерянной
+
+
+def _set_extraction_state(calc_id: int, **fields) -> None:
+    from app.database import SessionLocal
+    with SessionLocal() as s:
+        s.query(Calculation).filter(Calculation.id == calc_id).update(fields)
+        s.commit()
+
+
+async def _run_extraction_job(calc_id: int, project_id: int,
+                              file_infos: list, model: str) -> None:
+    from app.database import SessionLocal
+    from app.models import ProjectFile as _PF
+    try:
+        _set_extraction_state(calc_id, extraction_progress={
+            "step": 1, "total": 3, "message": "Извлечение текста из файлов…"})
+
+        # Кэш распарсенного текста в project_files.extracted_text —
+        # vision-OCR сканов дорог, повторять на каждом прогоне нельзя.
+        parts: list[str] = []
+        for f_id, f_path, f_cached in file_infos:
+            if f_cached and f_cached.strip():
+                parts.append(f_cached)
+                continue
+            text = await asyncio.to_thread(parse_project_files, [f_path])
+            parts.append(text)
+            if text.strip() and not text.startswith("[Ошибка"):
+                with SessionLocal() as cache_db:
+                    rec = cache_db.query(_PF).filter(_PF.id == f_id).first()
+                    if rec:
+                        rec.extracted_text = text
+                        cache_db.commit()
+        combined_text = "\n\n---\n\n".join(p for p in parts if p.strip())
+
+        _set_extraction_state(calc_id, extraction_progress={
+            "step": 2, "total": 3,
+            "message": f"AI-анализ технического задания… ({model})"})
+
+        with SessionLocal() as new_db:
+            from app.services.entity_extractor import extract_entities_openrouter
+            result = await extract_entities_openrouter(combined_text, model, db=new_db)
+
+        with SessionLocal() as new_db:
+            # geological_surveys ведутся отдельно — сохраняем при перезаписи
+            existing_calc = new_db.query(Calculation).filter(
+                Calculation.id == calc_id).first()
+            existing_surveys = (
+                (existing_calc.extracted_entities or {}).get("geological_surveys", [])
+                if existing_calc else [])
+            new_ee = result.model_dump()
+            new_ee.setdefault("geological_surveys", existing_surveys)
+            new_db.query(Calculation).filter(Calculation.id == calc_id).update({
+                "extracted_entities": new_ee,
+                "extraction_status": "done",
+                "extraction_progress": {"step": 3, "total": 3, "message": "Готово"},
+                "extraction_error": None,
+            })
+            new_db.query(Project).filter(Project.id == project_id).update(
+                {"status": "extracted"})
+            new_db.commit()
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        _set_extraction_state(calc_id, extraction_status="error",
+                              extraction_error=str(exc))
+
+
+@router.post("/{calc_id}/extract", status_code=202)
+async def start_extraction_job(
+    project_id: int,
+    calc_id: int,
+    current_user: User = Depends(require_calculate),
+    db: Session = Depends(get_db),
+):
+    """Запуск фонового AI-анализа ТЗ; статус — GET /extraction-status."""
+    project, calc = _get_calc(project_id, calc_id, current_user.id, db)
+    _ensure_draft(calc)
+    if not project.files:
+        raise HTTPException(status_code=422, detail="Загрузите хотя бы один файл ТЗ")
+
+    if calc.extraction_status == "running" and calc.extraction_started_at and \
+            (datetime.utcnow() - calc.extraction_started_at).total_seconds() \
+            < _EXTRACTION_STALE_MIN * 60:
+        return {"status": "running", "progress": calc.extraction_progress}
+
+    from app.services.clarify_service import get_setting
+    model = get_setting(db, "extraction_model", "qwen/qwen3.7-plus")
+
+    file_infos = [(f.id, f.file_path, f.extracted_text) for f in project.files]
+    calc.extraction_status = "running"
+    calc.extraction_started_at = datetime.utcnow()
+    calc.extraction_error = None
+    calc.extraction_progress = {"step": 0, "total": 3, "message": "Инициализация…"}
+    project.status = "processing"
+    db.commit()
+    asyncio.create_task(_run_extraction_job(calc.id, project.id, file_infos, model))
+    return {"status": "running", "progress": calc.extraction_progress}
+
+
+@router.get("/{calc_id}/extraction-status")
+def extraction_status(
+    project_id: int,
+    calc_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _, calc = _get_calc(project_id, calc_id, current_user.id, db)
+    status = calc.extraction_status
+    error = calc.extraction_error
+    if status == "running" and calc.extraction_started_at and \
+            (datetime.utcnow() - calc.extraction_started_at).total_seconds() \
+            > _EXTRACTION_STALE_MIN * 60:
+        # бэкенд перезапускался — задача утеряна
+        status = "error"
+        error = "Анализ прерван (перезапуск сервера). Запустите повторно."
+    return {"status": status, "progress": calc.extraction_progress, "error": error}
+
+
 @router.post("/{calc_id}/compute")
 def compute_calculation(
     project_id: int,
@@ -667,6 +790,7 @@ def list_calculations(
             "created_at": c.created_at,
             "finalized_at": c.finalized_at,
             "n_entities": len((c.extracted_entities or {}).get("entities") or []),
+            "extraction_status": c.extraction_status,
             "total_with_vat": total,
             "exports": [{"kind": e.kind, "filename": e.filename, "id": e.id}
                         for e in c.exports],
