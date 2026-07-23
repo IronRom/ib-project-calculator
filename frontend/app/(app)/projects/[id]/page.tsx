@@ -39,12 +39,13 @@ export default function ProjectPage() {
     }).catch(() => {})
   }, [id])
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>, fileType = 'tz') {
-    if (!e.target.files?.length || !project) return
+  const [dragOver, setDragOver] = useState(false)
+
+  async function uploadOne(file: File, fileType = 'tz') {
+    if (!project) return
     setUploading(true)
     setError('')
     try {
-      const file = e.target.files[0]
       const pf = await uploadFile(project.id, file, fileType)
       setProject((prev) => prev ? { ...prev, files: [...prev.files, pf] } : prev)
     } catch (err: unknown) {
@@ -53,6 +54,20 @@ export default function ProjectPage() {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
+  }
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>, fileType = 'tz') {
+    if (!e.target.files?.length) return
+    for (const f of Array.from(e.target.files)) await uploadOne(f, fileType)
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragOver(false)
+    const files = Array.from(e.dataTransfer.files || []).filter(f =>
+      /\.(pdf|docx?|xls|xlsx)$/i.test(f.name))
+    if (!files.length) { setError('Поддерживаются PDF, DOC(X), XLS(X)'); return }
+    files.forEach(f => uploadOne(f))
   }
 
   async function handleDelete(fileId: number) {
@@ -202,8 +217,17 @@ export default function ProjectPage() {
           </div>
         )}
 
-        {/* Files card */}
-        <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+        {/* Files card (drag&drop на всю карточку) */}
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false) }}
+          onDrop={onDrop}
+          style={{
+            background: dragOver ? 'rgba(31,95,232,0.06)' : 'var(--bg-elevated)',
+            border: dragOver ? '1px dashed var(--blue-400)' : 'var(--hairline)',
+            borderRadius: 'var(--radius-lg)', overflow: 'hidden',
+            transition: 'background 150ms ease, border-color 150ms ease',
+          }}>
           <div style={{ padding: '14px 18px', borderBottom: 'var(--hairline)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontSize: 14, fontWeight: 600 }}>Файлы технического задания</div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -226,7 +250,7 @@ export default function ProjectPage() {
               onClick={() => fileInputRef.current?.click()}
             >
               <div style={{ fontSize: 32 }}>📄</div>
-              <div style={{ fontSize: 14, color: 'var(--fg-2)' }}>Нажмите для загрузки или перетащите файл</div>
+              <div style={{ fontSize: 14, color: 'var(--fg-2)' }}>Нажмите или перетащите файлы сюда</div>
               <div style={{ fontSize: 12 }}>PDF, DOCX — до 50 МБ</div>
             </div>
           ) : (
