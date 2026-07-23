@@ -29,6 +29,7 @@ class UserOut(BaseModel):
     email: str
     role: str
     can_calculate: bool
+    is_active: bool = True
     company: Optional[str]
     created_at: datetime
 
@@ -145,6 +146,7 @@ class CalculationOut(BaseModel):
 class UserUpdateAdmin(BaseModel):
     can_calculate: Optional[bool] = None
     role: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 class ReferenceBookOut(BaseModel):

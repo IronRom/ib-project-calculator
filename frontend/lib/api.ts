@@ -118,7 +118,7 @@ export function listUsers() {
   return request<User[]>('/admin/users')
 }
 
-export function updateUser(userId: number, data: { can_calculate?: boolean; role?: string }) {
+export function updateUser(userId: number, data: { can_calculate?: boolean; role?: string; is_active?: boolean }) {
   return request<User>(`/admin/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
 
@@ -410,6 +410,7 @@ export interface User {
   email: string
   role: string
   can_calculate: boolean
+  is_active?: boolean
   company?: string
   created_at: string
 }
@@ -634,4 +635,8 @@ export function getAdminSettings() {
 export function putAdminSettings(body: Record<string, string>) {
   return request<Record<string, string>>(`/admin/settings`,
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+}
+
+export function createUser(body: { email: string; password: string; company?: string; role?: string; can_calculate?: boolean }) {
+  return request<User>(`/admin/users`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 }

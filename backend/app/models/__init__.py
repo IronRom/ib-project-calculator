@@ -110,6 +110,8 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role = Column(String(10), nullable=False, default="user")
     can_calculate = Column(Boolean, nullable=False, default=False)
+    # Блокировка администратором: False → вход запрещён
+    is_active = Column(Boolean, nullable=False, default=True)
     company = Column(String(255), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

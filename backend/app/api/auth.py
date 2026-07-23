@@ -37,6 +37,8 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == body.email).first()
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный email или пароль")
+    if not getattr(user, "is_active", True):
+        raise HTTPException(status_code=403, detail="Учётная запись заблокирована администратором")
     db.add(AuditLog(user_id=user.id, action="login"))
     db.commit()
     return TokenResponse(access_token=create_token(user.id))
