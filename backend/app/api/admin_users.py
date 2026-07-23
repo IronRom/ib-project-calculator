@@ -59,3 +59,40 @@ def delete_user(
         raise HTTPException(status_code=404, detail="Пользователь не найден")
     db.delete(user)
     db.commit()
+
+
+# ═══ Настройки системы (модели AI и пр.) ══════════════════════════════════
+
+@router.get("/settings")
+def get_settings(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    from app.models import AppSetting
+    return {s.key: s.value for s in db.query(AppSetting).all()}
+
+
+@router.put("/settings")
+def put_settings(
+    body: dict,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Обновить настройки. body: {key: value, ...}.
+
+    Ключи моделей: extraction_model, clarification_model (id OpenRouter).
+    """
+    from app.models import AppSetting
+    allowed = {"extraction_model", "clarification_model", "ocr_model"}
+    updated = {}
+    for k, v in body.items():
+        if k not in allowed:
+            raise HTTPException(status_code=422, detail=f"Неизвестный ключ: {k}")
+        rec = db.query(AppSetting).filter(AppSetting.key == k).first()
+        if rec:
+            rec.value = str(v)
+        else:
+            db.add(AppSetting(key=k, value=str(v)))
+        updated[k] = str(v)
+    db.commit()
+    return updated

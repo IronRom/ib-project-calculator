@@ -494,3 +494,34 @@ ws-черновиков старых СБЦП. Точные коды из эта
   полный состав сметы — модель классом выше; полнота экстракции — главный
   дифференциатор моделей
 - Хинт котельной работает на всех моделях (книга и таблица выбираются верно)
+
+### 2026-07-23 (тринадцатая сессия — бэкенд личного кабинета: версии/уточнения/финализация)
+- Модель ЛК утверждена: цепочка версий расчёта (parent_id, version_num),
+  черновик редактируем, финал заморожен навсегда; файлы 2ПС/КП привязаны
+  к финализированной версии; новая правка = новая версия от финала.
+  Файлы — на уровне ПРОЕКТА, уточнения — на уровне ВЕРСИИ расчёта
+- Миграция d0e1f2a3b4c5: calculations.parent_id/status/version_num/
+  finalized_at + calculation_clarifications (text, diff_json, model_used) +
+  calculation_exports (kind, file_path) + app_settings (модели AI)
+- `clarify_service.py`: уточнение свободным текстом = targeted AI-патч
+  (patch_entities tool: updates/adds/removes, температура 0, модель из
+  app_settings.clarification_model). Дифф с total_before/after; preview=true
+  возвращает дифф БЕЗ применения (подтверждение в UI)
+- API: GET /calculations (список: статусы, версии, exports, уточнения),
+  POST /{id}/versions, POST /{id}/clarify {text, preview}, POST /{id}/finalize
+  (пересчёт → генерация 2ПС xlsx + КП docx + КП pdf в uploads/exports/{id} →
+  status=final), GET /{id}/exports/{kind}/download. Все мутации черновика
+  защищены _ensure_draft (409 на финале)
+- Админ: GET/PUT /admin/settings (extraction_model, clarification_model,
+  ocr_model). Stream без ?model= берёт extraction_model из настроек
+  (дефолт qwen/qwen3.7-plus по решению пользователя)
+- Smoke полного цикла на Котельной: clarify preview (4→2 МВт, дифф с
+  суммами) → apply → finalize (3 валидных файла) → 409 на мутацию →
+  download 200 → версия v2 от финала. Golden 13/13
+- Фронт (следующий этап, дизайн-система в design-system/ib-calculator/):
+  главная «Intellect Building PIR system» (только вход, индустриальная),
+  админка админа (пользователи, модели), кабинет менеджера: ПРОЕКТЫ ПЛИТКОЙ,
+  внутри — файлы проекта + список расчётов (дата, статус: «Не подтверждён»/
+  зелёный «Расчёт окончен» + иконки скачивания), экран расчёта: таблица
+  позиций, правка показателей, поле уточнения с предпросмотром диффа,
+  кнопка «Финализировать»

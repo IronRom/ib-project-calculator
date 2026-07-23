@@ -237,10 +237,55 @@ class Calculation(Base):
     calculation_result = Column(JSONB, nullable=True)
     normative_citations = Column(JSONB, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    # Версионирование: цепочка v1→v2→…; черновик редактируем, финал заморожен
+    parent_id = Column(Integer, ForeignKey("calculations.id"), nullable=True)
+    status = Column(String(10), nullable=False, default="draft")  # draft | final
+    version_num = Column(Integer, nullable=False, default=1)
+    finalized_at = Column(DateTime, nullable=True)
 
     project = relationship("Project", back_populates="calculations")
     book = relationship("ReferenceBook")
     price_index = relationship("PriceIndex")
+    clarifications = relationship("CalculationClarification",
+                                  cascade="all, delete-orphan",
+                                  order_by="CalculationClarification.id")
+    exports = relationship("CalculationExport", cascade="all, delete-orphan")
+
+
+class CalculationClarification(Base):
+    """Свободнотекстовое уточнение версии расчёта + применённый diff."""
+    __tablename__ = "calculation_clarifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    calculation_id = Column(Integer, ForeignKey("calculations.id"),
+                            nullable=False, index=True)
+    text = Column(Text, nullable=False)
+    diff_json = Column(JSONB, nullable=True)
+    model_used = Column(String(100), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class CalculationExport(Base):
+    """Файл экспорта (2ПС xlsx / КП pdf / КП docx) финализированной версии."""
+    __tablename__ = "calculation_exports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    calculation_id = Column(Integer, ForeignKey("calculations.id"),
+                            nullable=False, index=True)
+    kind = Column(String(20), nullable=False)   # 2ps_xlsx | kp_pdf | kp_docx
+    file_path = Column(String(1000), nullable=False)
+    filename = Column(String(500), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AppSetting(Base):
+    """Настройки системы (админка админа): модели экстракции/уточнений и пр."""
+    __tablename__ = "app_settings"
+
+    key = Column(String(64), primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
 
 
 class AsutpFactorOption(Base):

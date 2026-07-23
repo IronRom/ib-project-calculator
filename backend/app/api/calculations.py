@@ -1,5 +1,6 @@
 import asyncio
 import urllib.parse
+from datetime import datetime
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -64,10 +65,17 @@ async def stream_extraction(
     if not calc:
         raise HTTPException(status_code=404, detail="Расчёт не найден")
 
+    if getattr(calc, "status", "draft") == "final":
+        raise HTTPException(status_code=409, detail="Расчёт финализирован — создайте новую версию")
+
     # Eagerly load everything before the generator — session closes when streaming starts
     file_infos = [(f.id, f.file_path, f.extracted_text) for f in project.files]
     project_db_id = project.id
     calc_db_id = calc.id
+    if not model:
+        # модель по умолчанию — из настроек (админка админа)
+        from app.services.clarify_service import get_setting
+        model = get_setting(db, "extraction_model", "qwen/qwen3.7-plus")
     openrouter_model = model  # capture for closure
 
     async def event_stream() -> AsyncGenerator[str, None]:
@@ -148,6 +156,7 @@ def compute_calculation(
         raise HTTPException(status_code=404, detail="Расчёт не найден")
     if not calc.extracted_entities:
         raise HTTPException(status_code=422, detail="Сначала запустите извлечение сущностей")
+    _ensure_draft(calc)
     result = calculate(calc.extracted_entities, db)
     calc.price_index_id = result.pop("_price_index_id", None)
     calc.calculation_result = result
@@ -170,6 +179,7 @@ def patch_entity_x_value(
     calc = db.query(Calculation).filter(Calculation.id == calc_id, Calculation.project_id == project.id).first()
     if not calc:
         raise HTTPException(status_code=404, detail="Расчёт не найден")
+    _ensure_draft(calc)
     entities = (calc.extracted_entities or {}).get("entities", [])
     if entity_idx < 0 or entity_idx >= len(entities):
         raise HTTPException(status_code=404, detail="Позиция не найдена")
@@ -309,6 +319,7 @@ def patch_geological_surveys(
     if not calc:
         raise HTTPException(status_code=404, detail="Расчёт не найден")
 
+    _ensure_draft(calc)
     surveys = [s.model_dump() for s in body.geological_surveys]
 
     # Ensure extracted_entities exists
@@ -606,3 +617,250 @@ def _get_own_project(project_id: int, user_id: int, db: Session) -> Project:
     if not project:
         raise HTTPException(status_code=404, detail="Проект не найден")
     return project
+
+
+# ═══ Жизненный цикл расчёта: версии, уточнения, финализация ═══════════════
+# Модель: цепочка версий (parent_id). Черновик (draft) редактируем;
+# финал (final) заморожен навсегда, к нему привязаны файлы 2ПС/КП.
+# Новая правка после финализации = новая версия от финала.
+
+def _get_calc(project_id: int, calc_id: int, user_id: int, db: Session):
+    project = _get_own_project(project_id, user_id, db)
+    calc = db.query(Calculation).filter(
+        Calculation.id == calc_id, Calculation.project_id == project.id
+    ).first()
+    if not calc:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+    return project, calc
+
+
+def _ensure_draft(calc) -> None:
+    if getattr(calc, "status", "draft") == "final":
+        raise HTTPException(
+            status_code=409,
+            detail="Расчёт финализирован и неизменяем. Создайте новую версию "
+                   "(POST /versions), чтобы вносить правки.",
+        )
+
+
+@router.get("")
+def list_calculations(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Список расчётов проекта со статусами, версиями и файлами экспорта."""
+    project = _get_own_project(project_id, current_user.id, db)
+    calcs = (db.query(Calculation)
+             .filter(Calculation.project_id == project.id)
+             .order_by(Calculation.id).all())
+    out = []
+    for c in calcs:
+        total = None
+        if c.calculation_result:
+            total = c.calculation_result.get("total_with_vat")
+        out.append({
+            "id": c.id,
+            "version_num": c.version_num,
+            "parent_id": c.parent_id,
+            "status": c.status,
+            "created_at": c.created_at,
+            "finalized_at": c.finalized_at,
+            "n_entities": len((c.extracted_entities or {}).get("entities") or []),
+            "total_with_vat": total,
+            "exports": [{"kind": e.kind, "filename": e.filename, "id": e.id}
+                        for e in c.exports],
+            "clarifications": [{"id": cl.id, "text": cl.text[:200],
+                                "created_at": cl.created_at,
+                                "summary": (cl.diff_json or {}).get("summary", "")}
+                               for cl in c.clarifications],
+        })
+    return out
+
+
+@router.post("/{calc_id}/versions", status_code=201)
+def create_version(
+    project_id: int,
+    calc_id: int,
+    current_user: User = Depends(require_calculate),
+    db: Session = Depends(get_db),
+):
+    """Новая версия-черновик на базе существующего расчёта (обычно финала)."""
+    _, calc = _get_calc(project_id, calc_id, current_user.id, db)
+    new = Calculation(
+        project_id=calc.project_id,
+        book_version_id=calc.book_version_id,
+        price_index_id=calc.price_index_id,
+        extracted_entities=calc.extracted_entities,
+        calculation_result=calc.calculation_result,
+        parent_id=calc.id,
+        status="draft",
+        version_num=(calc.version_num or 1) + 1,
+    )
+    db.add(new)
+    db.commit()
+    db.refresh(new)
+    return {"id": new.id, "version_num": new.version_num, "parent_id": calc.id}
+
+
+@router.post("/{calc_id}/clarify")
+async def clarify_calculation(
+    project_id: int,
+    calc_id: int,
+    body: dict,
+    current_user: User = Depends(require_calculate),
+    db: Session = Depends(get_db),
+):
+    """Уточнение свободным текстом. body: {text, preview?: bool}.
+
+    preview=true — вернуть diff БЕЗ применения (для подтверждения в UI).
+    Иначе: применить патч, сохранить уточнение с diff, пересчитать.
+    """
+    from app.services.calculator import calculate
+    from app.services.clarify_service import clarify_entities, get_setting
+    from app.models import CalculationClarification
+    from sqlalchemy.orm.attributes import flag_modified
+
+    _, calc = _get_calc(project_id, calc_id, current_user.id, db)
+    _ensure_draft(calc)
+    text = (body.get("text") or "").strip()
+    if len(text) < 3:
+        raise HTTPException(status_code=422, detail="Пустое уточнение")
+    ee = calc.extracted_entities or {}
+    entities = ee.get("entities") or []
+    if not entities:
+        raise HTTPException(status_code=422, detail="Сначала выполните извлечение")
+
+    model_id = get_setting(db, "clarification_model", "qwen/qwen3.7-plus")
+    try:
+        new_entities, diff = await clarify_entities(entities, text, model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    old_total = (calc.calculation_result or {}).get("total_with_vat")
+
+    if body.get("preview"):
+        # посчитать «что будет» на копии, не трогая расчёт
+        probe = dict(ee)
+        probe["entities"] = new_entities
+        result = calculate(probe, db)
+        result.pop("_price_index_id", None)
+        diff["total_before"] = old_total
+        diff["total_after"] = result.get("total_with_vat")
+        return {"preview": True, "diff": diff}
+
+    ee["entities"] = new_entities
+    calc.extracted_entities = ee
+    flag_modified(calc, "extracted_entities")
+    result = calculate(ee, db)
+    calc.price_index_id = result.pop("_price_index_id", None)
+    calc.calculation_result = result
+    diff["total_before"] = old_total
+    diff["total_after"] = result.get("total_with_vat")
+    db.add(CalculationClarification(
+        calculation_id=calc.id, text=text, diff_json=diff, model_used=model_id,
+    ))
+    db.commit()
+    return {"preview": False, "diff": diff, "result": result}
+
+
+@router.post("/{calc_id}/finalize")
+def finalize_calculation(
+    project_id: int,
+    calc_id: int,
+    current_user: User = Depends(require_calculate),
+    db: Session = Depends(get_db),
+):
+    """Финализация: свежий пересчёт → генерация 2ПС/КП → заморозка версии."""
+    import os
+    from app.config import settings as cfg
+    from app.services.calculator import calculate
+    from app.services.export_2ps import generate_2ps_excel
+    from app.services.kp_generator import generate_kp_pdf, generate_kp_word
+    from app.models import CalculationExport
+
+    project, calc = _get_calc(project_id, calc_id, current_user.id, db)
+    _ensure_draft(calc)
+    ee = calc.extracted_entities or {}
+    if not (ee.get("entities") or ee.get("geological_surveys")):
+        raise HTTPException(status_code=422, detail="Нечего финализировать")
+
+    result = calculate(ee, db)
+    calc.price_index_id = result.pop("_price_index_id", None)
+    calc.calculation_result = result
+    stage = ee.get("stage", "П+Р")
+    tz_object_name = ee.get("tz_object_name", "")
+
+    out_dir = os.path.join(cfg.uploads_dir, "exports", str(calc.id))
+    os.makedirs(out_dir, exist_ok=True)
+    artifacts = [
+        ("2ps_xlsx", f"2ПС_ИР_{project.name}_v{calc.version_num}.xlsx",
+         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+         lambda: generate_2ps_excel(project.name, stage, result)),
+        ("kp_docx", f"КП_{project.name}_v{calc.version_num}.docx",
+         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+         lambda: generate_kp_word(project_name=project.name, stage=stage,
+                                  result=result, tz_object_name=tz_object_name)),
+        ("kp_pdf", f"КП_{project.name}_v{calc.version_num}.pdf",
+         "application/pdf",
+         lambda: generate_kp_pdf(project_name=project.name, stage=stage,
+                                 result=result, tz_object_name=tz_object_name)),
+    ]
+    # пере-финализация той же версии невозможна (_ensure_draft), но чистим
+    # возможные хвосты от прошлых неудачных попыток
+    db.query(CalculationExport).filter(
+        CalculationExport.calculation_id == calc.id).delete()
+    for kind, filename, _mt, gen in artifacts:
+        try:
+            content = gen()
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=500,
+                                detail=f"Генерация {kind} упала: {exc}")
+        path = os.path.join(out_dir, filename)
+        with open(path, "wb") as f:
+            f.write(content)
+        db.add(CalculationExport(calculation_id=calc.id, kind=kind,
+                                 file_path=path, filename=filename))
+
+    calc.status = "final"
+    calc.finalized_at = datetime.utcnow()
+    db.commit()
+    return {
+        "status": "final",
+        "finalized_at": calc.finalized_at,
+        "total_with_vat": result.get("total_with_vat"),
+        "exports": [{"kind": k, "filename": fn} for k, fn, _m, _g in artifacts],
+        "warnings": result.get("warnings", []),
+    }
+
+
+@router.get("/{calc_id}/exports/{kind}/download")
+def download_export(
+    project_id: int,
+    calc_id: int,
+    kind: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.models import CalculationExport
+    _, calc = _get_calc(project_id, calc_id, current_user.id, db)
+    rec = (db.query(CalculationExport)
+           .filter(CalculationExport.calculation_id == calc.id,
+                   CalculationExport.kind == kind).first())
+    if not rec:
+        raise HTTPException(status_code=404, detail="Файл не найден — финализируйте расчёт")
+    media = {
+        "2ps_xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "kp_docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "kp_pdf": "application/pdf",
+    }.get(kind, "application/octet-stream")
+    try:
+        with open(rec.file_path, "rb") as f:
+            content = f.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=410, detail="Файл экспорта утерян на диске")
+    safe = urllib.parse.quote(rec.filename)
+    return Response(content=content, media_type=media,
+                    headers={"Content-Disposition":
+                             f"attachment; filename*=UTF-8''{safe}"})
