@@ -158,6 +158,13 @@ input, textarea, select { font-family: inherit; }
 .app-sidebar { display: contents; }
 
 @media (max-width: 900px) {
+  /* iOS Safari зумит страницу при фокусе в поле со шрифтом <16px —
+     после этого вёрстка «выезжает за экран». 16px отключает авто-зум. */
+  input, select, textarea { font-size: 16px !important; }
+
+  /* страховка: страница никогда не скроллится горизонтально */
+  html, body { overflow-x: hidden; }
+
   /* сайдбар: off-canvas с бургером */
   .app-sidebar {
     display: block;
