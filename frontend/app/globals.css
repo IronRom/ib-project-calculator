@@ -140,6 +140,19 @@ input, textarea, select { font-family: inherit; }
 
 /* ═══ Мобильная адаптация (23.07.2026) ═══════════════════════════════════ */
 
+/* 100dvh вместо 100vh: в мобильном Safari панель браузера перекрывает низ
+   экрана (кнопка «Выйти» в сайдбаре). dvh учитывает реальную видимую область. */
+.app-shell {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+.sidebar-root {
+  height: 100vh;
+  height: 100dvh;
+}
+
 .mobile-burger { display: none; }
 .sidebar-overlay { display: none; }
 .app-sidebar { display: contents; }
@@ -157,7 +170,6 @@ input, textarea, select { font-family: inherit; }
     box-shadow: 8px 0 32px rgba(0,0,0,0.5);
   }
   .app-sidebar.open { transform: translateX(0); }
-  .app-sidebar aside { height: 100vh !important; }
 
   .mobile-burger {
     display: flex;

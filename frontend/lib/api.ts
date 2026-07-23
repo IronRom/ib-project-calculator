@@ -288,13 +288,6 @@ export function downloadExport2PS(projectId: number, calcId: number): Promise<vo
   return _downloadFile(`/projects/${projectId}/calculations/${calcId}/export`, `2ПС_ИР_${calcId}.xlsx`)
 }
 
-export function correctAndCompute(projectId: number, calcId: number, correctionText: string) {
-  return request<CalculationResult>(`/projects/${projectId}/calculations/${calcId}/correct-and-compute`, {
-    method: 'POST',
-    body: JSON.stringify({ correction_text: correctionText }),
-  })
-}
-
 async function _downloadFile(url: string, fallbackName: string): Promise<void> {
   const token = getToken()
   const res = await fetch(`${BASE}${url}`, {
@@ -626,6 +619,10 @@ export function finalizeCalc(projectId: number, calcId: number) {
 
 export function exportDownloadUrl(projectId: number, calcId: number, kind: string) {
   return `${BASE}/projects/${projectId}/calculations/${calcId}/exports/${kind}/download`
+}
+
+export function downloadExportFile(projectId: number, calcId: number, kind: string, fallbackName: string) {
+  return _downloadFile(`/projects/${projectId}/calculations/${calcId}/exports/${kind}/download`, fallbackName)
 }
 
 export function getAdminSettings() {

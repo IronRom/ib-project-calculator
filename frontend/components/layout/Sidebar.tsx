@@ -29,14 +29,13 @@ export function Sidebar({ userEmail, userRole, onLogout }: SidebarProps) {
     : '??'
 
   return (
-    <aside style={{
+    <aside className="sidebar-root" style={{
       width: 240,
       flex: 'none',
       background: 'var(--bg-surface)',
       borderRight: 'var(--hairline)',
       display: 'flex',
       flexDirection: 'column',
-      height: '100vh',
       position: 'sticky',
       top: 0,
     }}>
@@ -69,7 +68,7 @@ export function Sidebar({ userEmail, userRole, onLogout }: SidebarProps) {
       </nav>
 
       {/* User */}
-      <div style={{ padding: 12, borderTop: 'var(--hairline)' }}>
+      <div style={{ padding: '12px 12px calc(12px + env(safe-area-inset-bottom))', borderTop: 'var(--hairline)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px' }}>
           <div style={{
             width: 28, height: 28, borderRadius: '50%',

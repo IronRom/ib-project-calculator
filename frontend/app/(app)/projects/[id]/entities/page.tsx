@@ -1,12 +1,14 @@
 'use client'
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
-  getCalculation, getProject, computeCalculation, correctAndCompute,
+  getCalculation, getProject, computeCalculation,
   downloadExport2PS, downloadExportKP, patchEntity,
-  getUnitCheck, Calculation, ExtractedEntity, CalculationResult,
-  CalcPosition, Project, UnitCheckItem,
+  getUnitCheck, streamExtraction, listCalculations,
+  clarifyCalc, finalizeCalc, createVersion, downloadExportFile,
+  Calculation, ExtractedEntity, CalculationResult,
+  CalcPosition, Project, UnitCheckItem, CalcListItem, ClarifyDiff,
 } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
@@ -21,6 +23,12 @@ const CATEGORY_TONES: Record<string, 'success' | 'warning' | 'info'> = {
   new_construction: 'success',
   reconstruction:   'warning',
   overhaul:         'info',
+}
+
+const EXPORT_LABELS: Record<string, string> = {
+  '2ps_xlsx': '2ПС (Excel)',
+  kp_pdf: 'КП (PDF)',
+  kp_docx: 'КП (Word)',
 }
 
 function fmt(n: number): string {
@@ -63,7 +71,7 @@ function groupBySections(entities: ExtractedEntity[]) {
   })
 }
 
-export default function EntitiesPage() {
+export default function CalcWorkspacePage() {
   const { id } = useParams<{ id: string }>()
   const searchParams = useSearchParams()
   const calcId = searchParams.get('calc')
@@ -71,6 +79,7 @@ export default function EntitiesPage() {
 
   const [calc, setCalc]             = useState<Calculation | null>(null)
   const [project, setProject]       = useState<Project | null>(null)
+  const [meta, setMeta]             = useState<CalcListItem | null>(null)
   const [loading, setLoading]       = useState(true)
   const [calcResult, setCalcResult] = useState<CalculationResult | null>(null)
   const [computing, setComputing]   = useState(false)
@@ -78,26 +87,92 @@ export default function EntitiesPage() {
   const [unitChecks, setUnitChecks] = useState<UnitCheckItem[]>([])
   const [overrides, setOverrides]   = useState<Record<number, EntityOverride>>({})
   const [dirty, setDirty]           = useState(false)
-  const [correctionText, setCorrectionText] = useState('')
-  const [correcting, setCorrecting] = useState(false)
+
+  // AI-анализ ТЗ (SSE) прямо на этом экране
+  const [extracting, setExtracting]           = useState(false)
+  const [extractProgress, setExtractProgress] = useState({ step: 0, total: 3, message: 'Инициализация…' })
+  const [extractError, setExtractError]       = useState('')
+  const extractStartedRef = useRef(false)
+  const esRef = useRef<EventSource | null>(null)
+
+  // Уточнение свободным текстом (предпросмотр диффа → применение)
+  const [clarifyText, setClarifyText] = useState('')
+  const [clarifyBusy, setClarifyBusy] = useState(false)
+  const [clarifyDiff, setClarifyDiff] = useState<ClarifyDiff | null>(null)
+
+  const [finalizing, setFinalizing] = useState(false)
+
+  const readOnly = meta?.status === 'final'
+
+  const refreshMeta = useCallback(async () => {
+    const list = await listCalculations(Number(id))
+    const m = list.find(x => x.id === Number(calcId)) ?? null
+    setMeta(m)
+    return m
+  }, [id, calcId])
+
+  const startExtraction = useCallback(() => {
+    setExtracting(true)
+    setExtractError('')
+    setExtractProgress({ step: 0, total: 3, message: 'Инициализация…' })
+    esRef.current?.close()
+    const es = streamExtraction(Number(id), Number(calcId))
+    esRef.current = es
+    es.addEventListener('progress', (e) => {
+      setExtractProgress(JSON.parse((e as MessageEvent).data))
+    })
+    es.addEventListener('done', async () => {
+      es.close()
+      const c = await getCalculation(Number(id), Number(calcId))
+      setCalc(c)
+      // свежая экстракция: локальные правки и старый результат больше не актуальны
+      const init: Record<number, EntityOverride> = {}
+      ;(c.extracted_entities?.entities ?? []).forEach((e: ExtractedEntity, i: number) => {
+        if (e.deleted) init[i] = { deleted: true }
+      })
+      setOverrides(init)
+      setDirty(false)
+      setCalcResult(c.calculation_result ?? null)
+      setExtracting(false)
+      getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks).catch(() => {})
+    })
+    es.addEventListener('error', (e) => {
+      es.close()
+      try {
+        setExtractError(JSON.parse((e as MessageEvent).data).message)
+      } catch {
+        setExtractError('Ошибка AI-анализа ТЗ. Попробуйте ещё раз.')
+      }
+      setExtracting(false)
+    })
+  }, [id, calcId])
 
   useEffect(() => {
     if (!calcId) return
     Promise.all([
       getProject(Number(id)),
       getCalculation(Number(id), Number(calcId)),
-    ]).then(([proj, c]) => {
+      refreshMeta(),
+    ]).then(([proj, c, m]) => {
       setProject(proj)
       setCalc(c)
       if (c.calculation_result) setCalcResult(c.calculation_result)
-      // Init overrides from existing deleted/x_value state in DB
       const init: Record<number, EntityOverride> = {}
       ;(c.extracted_entities?.entities ?? []).forEach((e: ExtractedEntity, i: number) => {
         if (e.deleted) init[i] = { deleted: true }
       })
       setOverrides(init)
-      return getUnitCheck(Number(id), Number(calcId))
-    }).then(setUnitChecks).finally(() => setLoading(false))
+      const hasEntities = (c.extracted_entities?.entities?.length ?? 0) > 0
+      if (hasEntities) {
+        getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks).catch(() => {})
+      } else if (m?.status !== 'final' && !extractStartedRef.current) {
+        // новый расчёт: сразу запускаем AI-анализ ТЗ
+        extractStartedRef.current = true
+        startExtraction()
+      }
+    }).finally(() => setLoading(false))
+    return () => esRef.current?.close()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, calcId])
 
   function applyOverride(idx: number, patch: Partial<EntityOverride>) {
@@ -105,26 +180,29 @@ export default function EntitiesPage() {
     setDirty(true)
   }
 
+  async function savePendingOverrides() {
+    const saves = Object.entries(overrides).map(([idxStr, ov]) => {
+      const idx = Number(idxStr)
+      const patch: Partial<{ x_value: number | null; x_unit: string; deleted: boolean; pd_sections_pct: number | null; rd_sections_pct: number | null }> = {}
+      if (ov.x_value !== undefined)          patch.x_value          = ov.x_value
+      if (ov.x_unit  !== undefined)          patch.x_unit           = ov.x_unit
+      if (ov.deleted !== undefined)          patch.deleted           = ov.deleted
+      if (ov.pd_sections_pct !== undefined)  patch.pd_sections_pct  = ov.pd_sections_pct
+      if (ov.rd_sections_pct !== undefined)  patch.rd_sections_pct  = ov.rd_sections_pct
+      return Object.keys(patch).length ? patchEntity(Number(id), Number(calcId), idx, patch) : Promise.resolve()
+    })
+    await Promise.all(saves)
+    setDirty(false)
+  }
+
   async function handleCompute() {
     setComputing(true); setCalcError('')
     try {
-      // Save all pending overrides
-      const saves = Object.entries(overrides).map(([idxStr, ov]) => {
-        const idx = Number(idxStr)
-        const patch: Partial<{ x_value: number | null; x_unit: string; deleted: boolean; pd_sections_pct: number | null; rd_sections_pct: number | null }> = {}
-        if (ov.x_value !== undefined)          patch.x_value          = ov.x_value
-        if (ov.x_unit  !== undefined)          patch.x_unit           = ov.x_unit
-        if (ov.deleted !== undefined)          patch.deleted           = ov.deleted
-        if (ov.pd_sections_pct !== undefined)  patch.pd_sections_pct  = ov.pd_sections_pct
-        if (ov.rd_sections_pct !== undefined)  patch.rd_sections_pct  = ov.rd_sections_pct
-        return Object.keys(patch).length ? patchEntity(Number(id), Number(calcId), idx, patch) : Promise.resolve()
-      })
-      await Promise.all(saves)
-      setDirty(false)
+      await savePendingOverrides()
       const r = await computeCalculation(Number(id), Number(calcId))
       setCalcResult(r)
-      // Refresh unit checks
       getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks)
+      refreshMeta().catch(() => {})
     } catch (e: unknown) {
       setCalcError(e instanceof Error ? e.message : 'Ошибка расчёта')
     } finally {
@@ -132,18 +210,60 @@ export default function EntitiesPage() {
     }
   }
 
-  async function handleCorrect() {
-    if (!correctionText.trim()) return
-    setCorrecting(true); setCalcError('')
+  async function handleClarifyPreview() {
+    if (!clarifyText.trim()) return
+    setClarifyBusy(true); setCalcError(''); setClarifyDiff(null)
     try {
-      const r = await correctAndCompute(Number(id), Number(calcId), correctionText)
-      setCalcResult(r)
-      setCorrectionText('')
-      getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks)
+      const r = await clarifyCalc(Number(id), Number(calcId), clarifyText, true)
+      setClarifyDiff(r.diff)
     } catch (e: unknown) {
-      setCalcError(e instanceof Error ? e.message : 'Ошибка корректировки')
+      setCalcError(e instanceof Error ? e.message : 'Ошибка уточнения')
     } finally {
-      setCorrecting(false)
+      setClarifyBusy(false)
+    }
+  }
+
+  async function handleClarifyApply() {
+    setClarifyBusy(true); setCalcError('')
+    try {
+      const r = await clarifyCalc(Number(id), Number(calcId), clarifyText, false)
+      if (r.result) setCalcResult(r.result as CalculationResult)
+      setClarifyDiff(null)
+      setClarifyText('')
+      const c = await getCalculation(Number(id), Number(calcId))
+      setCalc(c)
+      getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks)
+      refreshMeta().catch(() => {})
+    } catch (e: unknown) {
+      setCalcError(e instanceof Error ? e.message : 'Ошибка применения уточнения')
+    } finally {
+      setClarifyBusy(false)
+    }
+  }
+
+  async function handleFinalize() {
+    if (!confirm('Финализировать расчёт? Версия будет заморожена — правки будут возможны только в новой версии. Будут сформированы файлы 2ПС и КП.')) return
+    setFinalizing(true); setCalcError('')
+    try {
+      await savePendingOverrides()
+      await finalizeCalc(Number(id), Number(calcId))
+      await refreshMeta()
+      const c = await getCalculation(Number(id), Number(calcId))
+      setCalc(c)
+      if (c.calculation_result) setCalcResult(c.calculation_result)
+    } catch (e: unknown) {
+      setCalcError(e instanceof Error ? e.message : 'Ошибка финализации')
+    } finally {
+      setFinalizing(false)
+    }
+  }
+
+  async function handleNewVersion() {
+    try {
+      const v = await createVersion(Number(id), Number(calcId))
+      router.push(`/projects/${id}/entities?calc=${v.id}`)
+    } catch (e: unknown) {
+      setCalcError(e instanceof Error ? e.message : 'Ошибка создания версии')
     }
   }
 
@@ -182,21 +302,90 @@ export default function EntitiesPage() {
     </tr>
   )
 
+  const extractPct = extractProgress.total > 0 ? Math.round((extractProgress.step / extractProgress.total) * 100) : 0
+
   return (
     <>
       <Topbar
-        title={project ? project.name : 'Анализ ТЗ'}
-        breadcrumb="Проекты / Извлечённые объекты"
+        title={meta ? `Расчёт №${meta.id} · v${meta.version_num}` : 'Расчёт'}
+        breadcrumb={project ? `Проекты / ${project.name}` : 'Проекты'}
         actions={
-          <Button variant="secondary" onClick={() => router.push(`/projects/${id}`)}>
-            ← Назад
-          </Button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {!readOnly && entities.length > 0 && (
+              <Button variant="secondary" size="sm" onClick={() => router.push(`/projects/${id}/geology?calc=${calcId}`)}>
+                Добавить ИГИ
+              </Button>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => router.push(`/projects/${id}`)}>
+              ← В проект
+            </Button>
+          </div>
         }
       />
       <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
+        {/* Финализированный расчёт: файлы + новая версия */}
+        {readOnly && meta && (
+          <div style={{ padding: '14px 18px', background: 'var(--status-success-bg)', border: '1px solid var(--success-500)', borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--success-400)' }}>
+              ✓ Расчёт финализирован{meta.finalized_at ? ` ${new Date(meta.finalized_at).toLocaleString('ru-RU')}` : ''} — версия заморожена
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {meta.exports.map((ex) => (
+                <button key={ex.kind}
+                  onClick={() => downloadExportFile(Number(id), Number(calcId), ex.kind, ex.filename).catch(e => setCalcError(e.message))}
+                  title={ex.filename}
+                  style={{
+                    fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: 0.3,
+                    padding: '6px 12px', borderRadius: 6, cursor: 'pointer',
+                    background: 'var(--success-100)', color: 'var(--success-400)',
+                    border: '1px solid var(--success-500)',
+                  }}>
+                  ↓ {EXPORT_LABELS[ex.kind] || ex.kind}
+                </button>
+              ))}
+              <button
+                onClick={handleNewVersion}
+                title="Создать новую редактируемую версию на базе этого расчёта"
+                style={{
+                  fontFamily: 'var(--font-mono)', fontSize: 11, padding: '6px 12px',
+                  borderRadius: 6, cursor: 'pointer',
+                  background: 'transparent', color: 'var(--fg-2)',
+                  border: '1px solid var(--border-default)',
+                }}>⎇ Новая версия</button>
+            </div>
+          </div>
+        )}
+
+        {/* AI-анализ ТЗ: прогресс / ошибка */}
+        {extracting && (
+          <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: '24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>AI-анализ технического задания</div>
+              <div style={{ fontSize: 13, color: 'var(--fg-3)' }}>
+                Шаг {extractProgress.step} из {extractProgress.total}: {extractProgress.message}
+              </div>
+            </div>
+            <div style={{ background: 'var(--bg-raised)', borderRadius: 'var(--radius-full)', height: 6, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${extractPct}%`, background: 'var(--accent)', borderRadius: 'var(--radius-full)', transition: 'width 0.3s ease' }} />
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-3)', textAlign: 'right' }}>{extractPct}%</div>
+          </div>
+        )}
+        {extractError && !extracting && (
+          <div style={{ padding: '14px 18px', background: 'var(--danger-100)', border: '1px solid var(--danger-500)', borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 13, color: 'var(--danger-400)' }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Ошибка AI-анализа ТЗ</div>
+              {extractError}
+            </div>
+            <div>
+              <Button variant="secondary" size="sm" onClick={startExtraction}>↻ Повторить анализ</Button>
+            </div>
+          </div>
+        )}
+
         {/* Badges */}
-        {result && (
+        {result && entities.length > 0 && (
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <ConfidenceBadge value={result.overall_confidence} />
             {result.stage && <MetaBadge label="Стадия" value={result.stage} />}
@@ -205,6 +394,12 @@ export default function EntitiesPage() {
               <span style={{ fontSize: 12, color: 'var(--warning-400)', fontFamily: 'var(--font-mono)' }}>
                 ● несохранённые изменения
               </span>
+            )}
+            {!readOnly && !extracting && (
+              <button
+                onClick={() => { if (confirm('Повторить AI-анализ ТЗ? Текущие позиции и правки будут заменены заново извлечёнными.')) startExtraction() }}
+                style={{ fontFamily: 'var(--font-mono)', fontSize: 11, padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'transparent', color: 'var(--fg-3)', border: '1px solid var(--border-default)' }}
+              >↻ повторить анализ ТЗ</button>
             )}
           </div>
         )}
@@ -222,19 +417,19 @@ export default function EntitiesPage() {
         {/* used_minimum warning banner */}
         {calcResult && calcResult.positions.some(p => p.used_minimum) && (
           <div style={{
-            background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 6,
-            padding: '8px 14px', fontSize: 13, color: '#78350f',
+            background: 'var(--status-warning-bg)', border: '1px solid var(--warning-500)', borderRadius: 6,
+            padding: '8px 14px', fontSize: 13, color: 'var(--warning-400)',
           }}>
             ⚠️ Часть позиций рассчитана по минимальным значениям. Уточните параметры для точной стоимости.
           </div>
         )}
 
         {/* Entities tables */}
-        {entities.length === 0 ? (
+        {!extracting && !extractError && entities.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
             AI не смог извлечь объекты из ТЗ.
           </div>
-        ) : (
+        ) : entities.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Obvious */}
             <EntityTable
@@ -243,12 +438,11 @@ export default function EntitiesPage() {
               subset={obvious}
               unitChecks={unitChecks}
               overrides={overrides}
-              projectId={Number(id)}
-              calcId={Number(calcId)}
               onOverride={applyOverride}
               theadRow={theadRow}
               makeColGroup={makeColGroup}
               calcResult={calcResult}
+              readOnly={readOnly}
             />
             {/* Suggested */}
             {suggested.length > 0 && (
@@ -259,58 +453,108 @@ export default function EntitiesPage() {
                 subset={suggested}
                 unitChecks={unitChecks}
                 overrides={overrides}
-                projectId={Number(id)}
-                calcId={Number(calcId)}
                 onOverride={applyOverride}
                 theadRow={theadRow}
                 makeColGroup={makeColGroup}
                 calcResult={calcResult}
+                readOnly={readOnly}
                 warn
               />
             )}
           </div>
         )}
 
-        {/* Correction text field + Recalculate */}
-        {entities.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {calcResult && (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <textarea
-                  value={correctionText}
-                  onChange={e => setCorrectionText(e.target.value)}
-                  placeholder="Комментарий для корректировки AI (необязательно): например «АСУТП: Ф7=п.4.3, Ф9=п.6.2» или «ячеек 20 шт, кабелей 300 п.м»"
-                  rows={2}
-                  style={{
-                    flex: 1, padding: '8px 10px', fontSize: 13,
-                    border: '1px solid var(--border-2)', borderRadius: 'var(--radius-md)',
-                    resize: 'vertical', fontFamily: 'inherit', color: 'var(--fg-1)',
-                    background: 'var(--surface-1)',
-                  }}
-                />
-                <Button
-                  variant="secondary"
-                  disabled={correcting || !correctionText.trim()}
-                  onClick={handleCorrect}
-                  style={{ whiteSpace: 'nowrap', alignSelf: 'flex-end' }}
-                >
-                  {correcting ? 'Корректировка…' : 'Скорректировать и пересчитать'}
+        {/* Уточнение свободным текстом (AI-патч с предпросмотром) */}
+        {!readOnly && entities.length > 0 && (
+          <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Уточнение расчёта</div>
+              <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 2 }}>
+                Опишите правку свободным текстом — AI изменит позиции, вы увидите изменения до применения
+              </div>
+            </div>
+            <textarea
+              value={clarifyText}
+              onChange={e => { setClarifyText(e.target.value); setClarifyDiff(null) }}
+              placeholder="Например: «мощность котельной 2 МВт, а не 4», «убери АСУТП», «добавь наружное освещение 1,2 км»"
+              rows={2}
+              style={{
+                padding: '8px 10px', fontSize: 13,
+                border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
+                resize: 'vertical', fontFamily: 'inherit', color: 'var(--fg-1)',
+                background: 'var(--bg-input)',
+              }}
+            />
+            {clarifyDiff ? (
+              <div style={{ border: '1px solid var(--blue-700)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                <div style={{ padding: '10px 14px', background: 'var(--accent-tint)', fontSize: 13, fontWeight: 600, color: 'var(--blue-300)' }}>
+                  Предпросмотр изменений
+                </div>
+                <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {clarifyDiff.summary && (
+                    <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>{clarifyDiff.summary}</div>
+                  )}
+                  {clarifyDiff.changes?.length > 0 && (
+                    <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: 'var(--fg-2)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {clarifyDiff.changes.map((ch, i) => (
+                        <li key={i}>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', marginRight: 6 }}>
+                            {ch.type === 'add' ? '+ добавить' : ch.type === 'remove' ? '− убрать' : '± изменить'}
+                          </span>
+                          {ch.object_name}
+                          {ch.field && (
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>
+                              {' '}· {ch.field}: {String(ch.old ?? '—')} → {String(ch.new ?? '—')}
+                            </span>
+                          )}
+                          {ch.reason && <span style={{ color: 'var(--fg-3)' }}> — {ch.reason}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {(clarifyDiff.total_before != null || clarifyDiff.total_after != null) && (
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-1)' }}>
+                      Итог с НДС: {clarifyDiff.total_before != null ? fmt(clarifyDiff.total_before) : '—'} → <strong>{clarifyDiff.total_after != null ? fmt(clarifyDiff.total_after) : '—'}</strong> ₽
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                    <Button variant="primary" size="sm" disabled={clarifyBusy} onClick={handleClarifyApply}>
+                      {clarifyBusy ? 'Применение…' : 'Применить и пересчитать'}
+                    </Button>
+                    <Button variant="ghost" size="sm" disabled={clarifyBusy} onClick={() => setClarifyDiff(null)}>
+                      Отмена
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <Button variant="secondary" size="sm" disabled={clarifyBusy || !clarifyText.trim()} onClick={handleClarifyPreview}>
+                  {clarifyBusy ? 'AI анализирует…' : 'Предпросмотр изменений'}
                 </Button>
               </div>
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <Button variant="primary" disabled={computing || !calcId} onClick={handleCompute}>
-                {computing ? 'Расчёт…' : calcResult ? 'Пересчитать' : 'Рассчитать стоимость ПИР'}
-              </Button>
-              {dirty && !computing && (
-                <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Нажмите, чтобы применить изменения</span>
-              )}
-              {calcError && <span style={{ fontSize: 13, color: 'var(--danger-400)' }}>{calcError}</span>}
-            </div>
           </div>
         )}
 
-        {/* 2ПС result */}
+        {/* Рассчитать / статус */}
+        {!readOnly && entities.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <Button variant="primary" disabled={computing || !calcId} onClick={handleCompute}>
+              {computing ? 'Расчёт…' : calcResult ? 'Пересчитать' : 'Рассчитать стоимость ПИР'}
+            </Button>
+            {dirty && !computing && (
+              <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Нажмите, чтобы применить изменения</span>
+            )}
+          </div>
+        )}
+        {calcError && (
+          <div style={{ padding: '10px 14px', background: 'var(--danger-100)', border: '1px solid var(--danger-500)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--danger-400)' }}>
+            {calcError}
+          </div>
+        )}
+
+        {/* Результат: ошибки, предупреждения, 2ПС, финализация */}
         {calcResult && (
           <>
             {calcResult.errors.length > 0 && (
@@ -319,15 +563,29 @@ export default function EntitiesPage() {
                 {calcResult.errors.map((e, i) => <div key={i} style={{ marginLeft: 12 }}>• {e}</div>)}
               </div>
             )}
+            {(calcResult.warnings?.length ?? 0) > 0 && (
+              <div style={{ padding: '12px 16px', background: 'var(--status-warning-bg)', border: '1px solid var(--warning-500)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--warning-400)' }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>⚠ Предупреждения расчёта (влияют на точность цены):</div>
+                {calcResult.warnings!.map((w, i) => <div key={i} style={{ marginLeft: 12 }}>• {w}</div>)}
+              </div>
+            )}
             <ResultTable result={calcResult} tdBase={tdBase} tdMono={tdMono} th={th} />
-            {calcId && (
-              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+            {calcId && !readOnly && (
+              <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Button variant="primary" disabled={finalizing || computing || dirty} onClick={handleFinalize}>
+                  {finalizing ? 'Финализация…' : '✓ Финализировать расчёт'}
+                </Button>
                 <Button variant="secondary" onClick={() => downloadExport2PS(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
-                  ↓ Скачать 2ПС ИР
+                  ↓ 2ПС ИР (черновик)
                 </Button>
                 <Button variant="secondary" onClick={() => downloadExportKP(Number(id), Number(calcId)).catch(e => setCalcError(e.message))}>
-                  ↓ Скачать КП
+                  ↓ КП (черновик)
                 </Button>
+                {dirty && (
+                  <span style={{ fontSize: 12, color: 'var(--warning-400)' }}>
+                    Сначала пересчитайте — есть несохранённые изменения
+                  </span>
+                )}
               </div>
             )}
           </>
@@ -339,14 +597,13 @@ export default function EntitiesPage() {
 
 // ── Entity table block ────────────────────────────────────────────────────────
 function EntityTable({
-  title, subtitle, entities, subset, unitChecks, overrides, projectId, calcId, onOverride, theadRow, makeColGroup, calcResult, warn,
+  title, subtitle, entities, subset, unitChecks, overrides, onOverride, theadRow, makeColGroup, calcResult, readOnly, warn,
 }: {
   title: string; subtitle?: string; entities: ExtractedEntity[]; subset: ExtractedEntity[]
   unitChecks: UnitCheckItem[]; overrides: Record<number, EntityOverride>
-  projectId: number; calcId: number
   onOverride: (idx: number, patch: Partial<EntityOverride>) => void
   theadRow: React.ReactNode; makeColGroup: () => React.ReactNode
-  calcResult: CalculationResult | null; warn?: boolean
+  calcResult: CalculationResult | null; readOnly: boolean; warn?: boolean
 }) {
   const borderColor = warn ? 'var(--warning-500)' : 'var(--border-default)'
 
@@ -393,9 +650,9 @@ function EntityTable({
                   {hasMultipleSections && (
                     <tr>
                       <td colSpan={COL_COUNT} style={{
-                        background: '#f0f4ff', padding: '6px 12px',
-                        fontWeight: 600, fontSize: 13, color: '#1e40af',
-                        borderTop: '2px solid #3b82f6',
+                        background: 'var(--accent-tint)', padding: '6px 12px',
+                        fontWeight: 600, fontSize: 13, color: 'var(--blue-300)',
+                        borderTop: '2px solid var(--blue-500)',
                       }}>
                         {sectionNum === 0 ? 'Без этапа' : `Этап ${sectionNum}${name ? `: ${name}` : ''}`}
                       </td>
@@ -413,14 +670,12 @@ function EntityTable({
                       <EntityRow
                         key={globalIdx}
                         entity={entity}
-                        entityIdx={globalIdx}
-                        projectId={projectId}
-                        calcId={calcId}
                         unitCheck={unitChecks[globalIdx]}
                         isLast={hasMultipleSections ? false : isLastOverall}
                         override={ov}
                         isDeleted={isDeleted}
                         stage={calcResult?.stage ?? 'П+Р'}
+                        readOnly={readOnly}
                         onOverride={(patch) => onOverride(globalIdx, patch)}
                       />
                     )
@@ -428,8 +683,8 @@ function EntityTable({
 
                   {/* Section subtotal row */}
                   {hasMultipleSections && sectionNum > 0 && sectionCost > 0 && (
-                    <tr style={{ background: '#f8fafc' }}>
-                      <td colSpan={COL_COUNT - 1} style={{ padding: '4px 12px', textAlign: 'right', fontSize: 12, color: '#64748b' }}>
+                    <tr style={{ background: 'var(--bg-raised)' }}>
+                      <td colSpan={COL_COUNT - 1} style={{ padding: '4px 12px', textAlign: 'right', fontSize: 12, color: 'var(--fg-3)' }}>
                         Итог этапа:
                       </td>
                       <td style={{ padding: '4px 12px', textAlign: 'right', fontWeight: 600, fontSize: 12 }}>
@@ -448,11 +703,12 @@ function EntityTable({
 }
 
 // ── Single entity row ─────────────────────────────────────────────────────────
-function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, override, isDeleted, stage, onOverride }: {
-  entity: ExtractedEntity; entityIdx: number; projectId: number; calcId: number
+function EntityRow({ entity, unitCheck, isLast, override, isDeleted, stage, readOnly, onOverride }: {
+  entity: ExtractedEntity
   unitCheck?: UnitCheckItem; isLast: boolean
   override: EntityOverride; isDeleted: boolean
   stage?: string
+  readOnly: boolean
   onOverride: (patch: Partial<EntityOverride>) => void
 }) {
   const [editing, setEditing] = useState(false)
@@ -470,6 +726,7 @@ function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, ov
   const strikeStyle: React.CSSProperties = isDeleted ? { textDecoration: 'line-through', opacity: 0.45 } : {}
 
   function startEdit() {
+    if (readOnly) return
     setInputVal(effectiveX != null ? String(effectiveX).replace('.', ',') : '')
     setEditing(true)
     setTimeout(() => inputRef.current?.focus(), 0)
@@ -504,7 +761,7 @@ function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, ov
     }
   }
 
-  // X (из ТЗ) cell — always editable
+  // X (из ТЗ) cell — editable in draft
   const xCell = editing ? (
     <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
       <input
@@ -519,10 +776,10 @@ function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, ov
     </div>
   ) : (
     <div
-      onClick={isDeleted ? undefined : startEdit}
-      title={xMissing ? (entity.x_value_missing_reason ?? 'Не указано в ТЗ') : 'Нажмите для редактирования'}
+      onClick={(isDeleted || readOnly) ? undefined : startEdit}
+      title={xMissing ? (entity.x_value_missing_reason ?? 'Не указано в ТЗ') : readOnly ? undefined : 'Нажмите для редактирования'}
       style={{
-        cursor: isDeleted ? 'default' : 'pointer',
+        cursor: (isDeleted || readOnly) ? 'default' : 'pointer',
         display: 'block', width: '100%', textAlign: 'right',
         fontFamily: 'var(--font-mono)', fontSize: 12,
         padding: '3px 8px', borderRadius: 4,
@@ -555,7 +812,7 @@ function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, ov
         <td style={{ padding: '10px 12px' }}>{unitCell}</td>
         <td style={{ padding: '10px 12px' }}><ConfidenceBadge value={entity.confidence ?? 0} small /></td>
         <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-          {isDeleted ? (
+          {readOnly ? null : isDeleted ? (
             <button
               onClick={() => onOverride({ deleted: false })}
               style={{ fontSize: 11, padding: '3px 8px', background: 'transparent', border: '1px solid var(--fg-3)', borderRadius: 4, color: 'var(--fg-3)', cursor: 'pointer' }}
@@ -583,7 +840,7 @@ function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, ov
               <div style={{ fontSize: 12, color: 'var(--fg-3)', fontStyle: 'italic', ...strikeStyle }}>{entity.notes}</div>
             )}
             {hasPct && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 6, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 11, color: 'var(--fg-3)', fontWeight: 600 }}>Разделы %:</span>
                 {(['ПД', 'РД'] as const).map((lbl) => {
                   const field = lbl === 'ПД' ? 'pd_sections_pct' : 'rd_sections_pct'
@@ -592,14 +849,15 @@ function EntityRow({ entity, entityIdx, projectId, calcId, unitCheck, isLast, ov
                     <label key={lbl} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
                       <span style={{
                         padding: '1px 5px', borderRadius: 3, fontSize: 10, fontWeight: 700,
-                        background: lbl === 'ПД' ? '#dbeafe' : '#f3f4f6',
-                        color: lbl === 'ПД' ? '#1d4ed8' : '#6b7280',
-                        border: '1px solid #e5e7eb',
+                        background: lbl === 'ПД' ? 'var(--accent-tint)' : 'var(--bg-raised)',
+                        color: lbl === 'ПД' ? 'var(--blue-300)' : 'var(--fg-2)',
+                        border: '1px solid var(--border-default)',
                       }}>{lbl}</span>
                       <input
                         type="number"
                         min={0} max={100} step={0.5}
                         placeholder="100"
+                        disabled={readOnly}
                         value={val != null ? Math.round(val * 100) : ''}
                         onChange={e => {
                           const n = parseFloat(e.target.value)
@@ -680,9 +938,9 @@ function ResultTable({ result, tdBase, tdMono, th }: { result: CalculationResult
                     <span style={{
                       display: 'inline-block', marginRight: 5,
                       padding: '1px 5px', borderRadius: 3, fontSize: 10, fontWeight: 700,
-                      background: pos.stage_label === 'ПД' ? '#dbeafe' : '#f3f4f6',
-                      color: pos.stage_label === 'ПД' ? '#1d4ed8' : '#6b7280',
-                      border: '1px solid #e5e7eb',
+                      background: pos.stage_label === 'ПД' ? 'var(--accent-tint)' : 'var(--bg-raised)',
+                      color: pos.stage_label === 'ПД' ? 'var(--blue-300)' : 'var(--fg-2)',
+                      border: '1px solid var(--border-default)',
                     }}>{pos.stage_label}</span>
                   )}
                   {pos.name}
@@ -698,8 +956,8 @@ function ResultTable({ result, tdBase, tdMono, th }: { result: CalculationResult
                       title="Рассчитано по минимальному X. Уточните параметры для точного расчёта."
                       style={{
                         display: 'inline-block', marginRight: 4,
-                        background: '#fef3c7', color: '#92400e',
-                        border: '1px solid #f59e0b', borderRadius: 4,
+                        background: 'var(--status-warning-bg)', color: 'var(--warning-400)',
+                        border: '1px solid var(--warning-500)', borderRadius: 4,
                         fontSize: 10, padding: '1px 5px', fontWeight: 600,
                         verticalAlign: 'middle',
                       }}
