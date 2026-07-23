@@ -525,3 +525,23 @@ ws-черновиков старых СБЦП. Точные коды из эта
   зелёный «Расчёт окончен» + иконки скачивания), экран расчёта: таблица
   позиций, правка показателей, поле уточнения с предпросмотром диффа,
   кнопка «Финализировать»
+
+### 2026-07-23 (четырнадцатая сессия — фронт ЛК + ПРОД pir.i-build.tech)
+- Фронт: индустриальный вход «Intellect Building PIR System» (blueprint-сетка,
+  живые метрики), проекты плиткой, секция «Расчёты» в проекте (версии,
+  статусы, скачивание 2ПС/PDF/DOC, новая версия от финала), /admin/settings
+  (модели AI). Остался экран: панель уточнения + финализация в расчёте
+- ПРОД: 85.198.98.132 (Ubuntu 24.04, там 4 чужих сайта — НЕ ТРОГАТЬ их
+  конфиги!). Наше: пользователь deploy-pir (группа docker), /opt/pir
+  (compose+.env+дамп), порты ТОЛЬКО localhost 3010(front)/8010(back),
+  postgres во внутренней сети, nginx-конфиг отдельным файлом
+  sites-available/pir.i-build.tech (/api/→8010 со срезом префикса,
+  SSE proxy_buffering off), certbot TLS. RAM сервера 2G — сборка образов
+  ЗАПРЕЩЕНА на сервере, только в CI
+- CI/CD: .github/workflows/deploy.yml — по пушу в main: build backend +
+  frontend (Dockerfile.prod, multi-stage) → ghcr.io/ironrom/ib-pir-* →
+  ssh-деплой deploy-pir (pull, up -d, alembic upgrade, healthchecks).
+  Секрет PROD_SSH_KEY в repo; gh CLI установлен, авторизован (IronRom)
+- Первичный деплой ПРОШЁЛ: https://pir.i-build.tech (login 200, api 200,
+  админ r.lazarev входит), БД восстановлена из дампа (184 книги).
+  Соседние сайты живы (cvtailorlab 401 — их штатная защита)
