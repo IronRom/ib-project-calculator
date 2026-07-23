@@ -62,8 +62,11 @@ def delete_user(
 
 
 # ═══ Настройки системы (модели AI и пр.) ══════════════════════════════════
+# Отдельный роутер: /admin/settings (в /admin/users конфликтует с {user_id})
+settings_router = APIRouter(prefix="/admin/settings", tags=["admin"])
 
-@router.get("/settings")
+
+@settings_router.get("")
 def get_settings(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -72,7 +75,7 @@ def get_settings(
     return {s.key: s.value for s in db.query(AppSetting).all()}
 
 
-@router.put("/settings")
+@settings_router.put("")
 def put_settings(
     body: dict,
     current_user: User = Depends(require_admin),
