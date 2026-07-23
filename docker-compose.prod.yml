@@ -22,6 +22,11 @@ services:
     environment:
       DATABASE_URL: postgresql://pir_user:${DB_PASSWORD}@db:5432/pir_calc
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      # Гео-блок OpenRouter для IP сервера: задать прокси в /opt/pir/.env
+      # (OPENROUTER_PROXY=http://user:pass@host:port) — httpx уважает env
+      HTTPS_PROXY: ${OPENROUTER_PROXY:-}
+      HTTP_PROXY: ${OPENROUTER_PROXY:-}
+      NO_PROXY: db,localhost,127.0.0.1
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
