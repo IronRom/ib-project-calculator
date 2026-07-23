@@ -91,7 +91,7 @@ export default function CalcWorkspacePage() {
   // AI-анализ ТЗ — фоновая задача на сервере, экран лишь опрашивает статус.
   // Вкладку можно закрыть и вернуться позже.
   const [extracting, setExtracting]           = useState(false)
-  const [extractProgress, setExtractProgress] = useState({ step: 0, total: 3, message: 'Инициализация…' })
+  const [extractProgress, setExtractProgress] = useState({ step: 0, total: 6, message: 'Инициализация…' })
   const [extractError, setExtractError]       = useState('')
   const extractStartedRef = useRef(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -157,7 +157,7 @@ export default function CalcWorkspacePage() {
   const startExtraction = useCallback(async () => {
     setExtracting(true)
     setExtractError('')
-    setExtractProgress({ step: 0, total: 3, message: 'Инициализация…' })
+    setExtractProgress({ step: 0, total: 6, message: 'Инициализация…' })
     try {
       const r = await startExtractionJob(Number(id), Number(calcId))
       if (r.progress) setExtractProgress(r.progress)

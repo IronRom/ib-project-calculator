@@ -162,7 +162,7 @@ async def _run_extraction_job(calc_id: int, project_id: int,
     from app.models import ProjectFile as _PF
     try:
         _set_extraction_state(calc_id, extraction_progress={
-            "step": 1, "total": 3, "message": "Извлечение текста из файлов…"})
+            "step": 1, "total": 6, "message": "Извлечение текста из файлов…"})
 
         # Кэш распарсенного текста в project_files.extracted_text —
         # vision-OCR сканов дорог, повторять на каждом прогоне нельзя.
@@ -182,12 +182,22 @@ async def _run_extraction_job(calc_id: int, project_id: int,
         combined_text = "\n\n---\n\n".join(p for p in parts if p.strip())
 
         _set_extraction_state(calc_id, extraction_progress={
-            "step": 2, "total": 3,
+            "step": 2, "total": 6,
             "message": f"AI-анализ технического задания… ({model})"})
+
+        # Экстрактор дёргает колбэк на границе каждого прохода —
+        # прогресс двигается по шагам 2..5 вместо застывшего «AI-анализ…»
+        prog = {"step": 1}
+
+        def _on_pass(message: str) -> None:
+            prog["step"] = min(prog["step"] + 1, 5)
+            _set_extraction_state(calc_id, extraction_progress={
+                "step": prog["step"], "total": 6, "message": message})
 
         with SessionLocal() as new_db:
             from app.services.entity_extractor import extract_entities_openrouter
-            result = await extract_entities_openrouter(combined_text, model, db=new_db)
+            result = await extract_entities_openrouter(
+                combined_text, model, db=new_db, progress_cb=_on_pass)
 
         with SessionLocal() as new_db:
             # geological_surveys ведутся отдельно — сохраняем при перезаписи
@@ -201,7 +211,7 @@ async def _run_extraction_job(calc_id: int, project_id: int,
             new_db.query(Calculation).filter(Calculation.id == calc_id).update({
                 "extracted_entities": new_ee,
                 "extraction_status": "done",
-                "extraction_progress": {"step": 3, "total": 3, "message": "Готово"},
+                "extraction_progress": {"step": 6, "total": 6, "message": "Готово"},
                 "extraction_error": None,
             })
             new_db.query(Project).filter(Project.id == project_id).update(
@@ -239,7 +249,7 @@ async def start_extraction_job(
     calc.extraction_status = "running"
     calc.extraction_started_at = datetime.utcnow()
     calc.extraction_error = None
-    calc.extraction_progress = {"step": 0, "total": 3, "message": "Инициализация…"}
+    calc.extraction_progress = {"step": 0, "total": 6, "message": "Инициализация…"}
     project.status = "processing"
     db.commit()
     asyncio.create_task(_run_extraction_job(calc.id, project.id, file_infos, model))

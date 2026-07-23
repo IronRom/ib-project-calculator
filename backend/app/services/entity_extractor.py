@@ -985,9 +985,21 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
 
 # ── OpenRouter three-pass ─────────────────────────────────────────────────────
 
-async def extract_entities_openrouter(text: str, model_id: str, db=None) -> ExtractionResult:
-    """Three-pass extraction via OpenRouter (OpenAI-compatible multi-turn)."""
+async def extract_entities_openrouter(text: str, model_id: str, db=None,
+                                       progress_cb=None) -> ExtractionResult:
+    """Three-pass extraction via OpenRouter (OpenAI-compatible multi-turn).
+
+    progress_cb(message) — опциональный колбэк на границах проходов,
+    чтобы фоновая задача показывала живой прогресс вместо застывшего шага.
+    """
     tz_text = text[: settings.max_tz_chars]
+
+    def _progress(message: str) -> None:
+        if progress_cb is not None:
+            try:
+                progress_cb(message)
+            except Exception:
+                pass  # прогресс не должен ронять экстракцию
 
     def _or_headers() -> dict:
         return {
@@ -1059,6 +1071,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
         return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
     # ── Step 0: book detection ────────────────────────────────────────────────
+    _progress("Определение применимых справочников…")
     detected_codes: list[str] = []
     if db is not None:
         detected_codes = _detect_books_from_text(tz_text)
@@ -1098,6 +1111,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
                 detected_codes = [c.strip() for c in raw.split(",") if c.strip()]
 
     # ── Pass 1 ────────────────────────────────────────────────────────────────
+    _progress("Извлечение позиций из ТЗ…")
     types_ctx = _build_types_context(db, detected_codes) if db is not None else ""
     hints_ctx = _build_hints_context(db, detected_codes) if db is not None else ""
     msg1_content = (
@@ -1146,6 +1160,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
         return result
 
     # ── Pass 2 ────────────────────────────────────────────────────────────────
+    _progress("Подбор коэффициентов…")
     entities_dicts = [e.model_dump() for e in result.entities]
     conditions_ctx = _build_conditions_context(db, entities_dicts)
     if not conditions_ctx:
@@ -1171,6 +1186,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None) -> Extr
     # ── Pass 3 (optional): resolve x_value=null ───────────────────────────────
     resolve_ctx = _build_resolve_x_context(result, tz_text, hints_ctx, db=db)
     if resolve_ctx:
+        _progress("Добор недостающих объёмов (X)…")
         data3 = await _call(
             [{"role": "user", "content": resolve_ctx}],
             [RESOLVE_X_TOOL_OPENAI],
