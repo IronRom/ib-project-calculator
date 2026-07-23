@@ -355,3 +355,68 @@ def test_barviha_ls02_geology(db):
                    "geological_surveys": [_survey(db, "МРР-3.2.02-23", items)]}, db)
     total = sum(p["cost"] for p in r["positions"])
     assert math.isclose(total, 540_756.0, rel_tol=2e-3), total
+
+
+# ── Самолёт ЛС-05: обмеры и обследования по СБЦП 81-2001-25 ──────────────
+
+def test_samolet_ls05_sbcp25(db):
+    """[Самолёт ЛС-05] Обмеры/обследования здания 5 182 м³ (X=51,82 сотен м³),
+    каркасное многоэтажное, кат. здания II, 2-я кат. сложности, высота до 6 м.
+
+    Базовые позиции (без преддоговорных 10%, они percent-механика):
+      обмеры т.2: 787,4 руб×51,82×7,1 = 289 702 руб
+      обследования т.4: 659,8×51,82×7,1 = 242 755
+      системы т.15 (объём 5,182 тыс.м³, ×1,2 усложняющий табл.10):
+        ГВС (до 8) 2,2×1,2×7,1 = 18 744; отопление (до 10) 3,3×1,2×7,1=28 116;
+        ХВС без ванн (до 8) 2,4×1,2×7,1 = 20 448
+      электросети т.15 п.8: 1,2×1,127 тыс.м²×7,1 = 9 602 (без К=1,2!)
+    Σ = 609 367 руб (эталон 670 303 = Σ×1,1 преддоговорных).
+    """
+    from app.models import BookObjectType, ReferenceBook
+    b = db.query(ReferenceBook).filter(ReferenceBook.code == "СБЦП 81-2001-25").first()
+    assert b is not None and b.is_active
+
+    def tid(table_num):
+        t = (db.query(BookObjectType)
+             .filter(BookObjectType.book_version_id == b.id,
+                     BookObjectType.table_num == table_num).first())
+        return t.id
+
+    def row_id(table_num, row_num):
+        from app.models import ReferenceRow
+        r = (db.query(ReferenceRow)
+             .filter(ReferenceRow.book_version_id == b.id,
+                     ReferenceRow.table_num == table_num,
+                     ReferenceRow.row_num == row_num).first())
+        assert r is not None, f"нет строки т.{table_num} {row_num}"
+        return r
+
+    # матричные строки адресуются row_num "п.{кат.работ}.{кат.здания}.{высота}"
+    assert float(row_id(2, "п.2.II.6").a) == pytest.approx(0.7874)
+    assert float(row_id(4, "п.2.II.6").a) == pytest.approx(0.6598)
+
+    k12 = [{"name": "harmful_shop", "value": 1.0}]  # табл.10 К=1,2
+    ents = [
+        _ent(object_name="Обмерные работы", sbts_code="СБЦП 81-2001-25",
+             sbts_table=2, sbts_object_type_id=row_id(2, "п.2.II.6").object_type_id,
+             x_value=51.82, x_unit="100 м³ строительного объёма"),
+        _ent(object_name="Обследования конструкций", sbts_code="СБЦП 81-2001-25",
+             sbts_table=4, sbts_object_type_id=row_id(4, "п.2.II.6").object_type_id,
+             x_value=51.82, x_unit="100 м³ строительного объёма"),
+        _ent(object_name="ГВС", sbts_code="СБЦП 81-2001-25", sbts_table=15,
+             sbts_object_type_id=tid(15), x_value=5.182, x_unit="тыс. м³",
+             coefficients=k12),
+        _ent(object_name="Электросети", sbts_code="СБЦП 81-2001-25", sbts_table=15,
+             sbts_object_type_id=tid(15), x_value=1.127, x_unit="тыс. м²"),
+    ]
+    r = calculate({"stage": "П+Р", "region": "Москва", "entities": ents}, db)
+    assert not r["errors"], r["errors"]
+    by_name = {}
+    for p in r["positions"]:
+        by_name[p["name"]] = by_name.get(p["name"], 0) + p["cost"]
+    assert math.isclose(by_name["Обмерные работы"], 787.4 * 51.82 * 7.1,
+                        abs_tol=0.5), by_name["Обмерные работы"]
+    assert math.isclose(by_name["Обследования конструкций"], 659.8 * 51.82 * 7.1,
+                        abs_tol=0.5)
+    assert math.isclose(by_name["ГВС"], 2200 * 1.2 * 7.1, abs_tol=0.5), by_name["ГВС"]
+    assert math.isclose(by_name["Электросети"], 1200 * 1.127 * 7.1, abs_tol=0.5), by_name["Электросети"]
