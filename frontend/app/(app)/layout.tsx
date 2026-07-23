@@ -1,19 +1,24 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { getMe, User } from '@/lib/api'
 import { Sidebar } from '@/components/layout/Sidebar'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
+  const pathname = usePathname()
   const [user, setUser] = useState<User | null>(null)
+  const [navOpen, setNavOpen] = useState(false)
 
   useEffect(() => {
     getMe()
       .then(setUser)
       .catch(() => router.push('/login'))
   }, [router])
+
+  // закрывать мобильное меню при навигации
+  useEffect(() => { setNavOpen(false) }, [pathname])
 
   function handleLogout() {
     localStorage.removeItem('pir_token')
@@ -30,8 +35,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar userEmail={user.email} userRole={user.role} onLogout={handleLogout} />
-      <main style={{ flex: 1, overflowY: 'auto', background: 'var(--bg-app)' }}>
+      {/* мобильный бургер + оверлей */}
+      <button
+        className="mobile-burger"
+        aria-label="Открыть меню"
+        onClick={() => setNavOpen(v => !v)}
+      >☰</button>
+      {navOpen && <div className="sidebar-overlay" onClick={() => setNavOpen(false)} />}
+
+      <div className={`app-sidebar ${navOpen ? 'open' : ''}`}>
+        <Sidebar userEmail={user.email} userRole={user.role} onLogout={handleLogout} />
+      </div>
+
+      <main className="app-main" style={{ flex: 1, overflowY: 'auto', background: 'var(--bg-app)' }}>
         {children}
       </main>
     </div>

@@ -137,3 +137,67 @@ input, textarea, select { font-family: inherit; }
   letter-spacing: 0.06em;
   color: var(--fg-3);
 }
+
+/* ═══ Мобильная адаптация (23.07.2026) ═══════════════════════════════════ */
+
+.mobile-burger { display: none; }
+.sidebar-overlay { display: none; }
+.app-sidebar { display: contents; }
+
+@media (max-width: 900px) {
+  /* сайдбар: off-canvas с бургером */
+  .app-sidebar {
+    display: block;
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 250px;
+    z-index: 90;
+    transform: translateX(-105%);
+    transition: transform 220ms ease;
+    box-shadow: 8px 0 32px rgba(0,0,0,0.5);
+  }
+  .app-sidebar.open { transform: translateX(0); }
+  .app-sidebar aside { height: 100vh !important; }
+
+  .mobile-burger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 10px; right: 12px;
+    z-index: 95;
+    width: 42px; height: 42px;
+    border-radius: 10px;
+    border: 1px solid var(--border-default);
+    background: var(--bg-elevated);
+    color: var(--fg-1);
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .sidebar-overlay {
+    display: block;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 80;
+  }
+
+  /* плотность страниц: паддинги и шапки */
+  .app-main > * > div[style*="padding: 24px 28px"],
+  .app-main div[style*="padding: 24px 28px"] { padding: 14px 12px !important; }
+  .app-main header { flex-wrap: wrap; gap: 10px; padding-right: 64px !important; }
+
+  /* формы-сетки складываются в колонку */
+  .app-main form[style*="grid-template-columns"] {
+    display: flex !important;
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+}
+
+/* любые таблицы данных скроллятся внутри карточки, не ломая страницу */
+.app-main div:has(> table) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.app-main table { min-width: 560px; }
+
+@media (max-width: 480px) {
+  .app-main table { font-size: 12px !important; }
+}

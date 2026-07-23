@@ -136,9 +136,9 @@ export default function LoginPage() {
       {/* ═══ Форма входа ═══ */}
       <div style={{
         flex: '1 1 0', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', padding: 48, background: 'var(--ink-900)',
+        justifyContent: 'center', padding: '32px 20px', background: 'var(--ink-900)',
       }}>
-        <form onSubmit={handleSubmit} style={{ width: 380, display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <form onSubmit={handleSubmit} style={{ width: 380, maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 18 }}>
           <div style={{
             fontFamily: 'var(--font-mono)', fontSize: 10,
             letterSpacing: 2, color: 'var(--ink-300)',
