@@ -545,3 +545,20 @@ ws-черновиков старых СБЦП. Точные коды из эта
 - Первичный деплой ПРОШЁЛ: https://pir.i-build.tech (login 200, api 200,
   админ r.lazarev входит), БД восстановлена из дампа (184 книги).
   Соседние сайты живы (cvtailorlab 401 — их штатная защита)
+
+### 2026-07-23 (пятнадцатая сессия — переезд прода на 155.212.230.118)
+- Причина: OpenRouter гео-блокировал старый IP 85.198.98.132 (403 security
+  policy на ЛЮБОЙ запрос — модели, экстракция). С нового IP — 200
+- Новый сервер: Ubuntu 24.04, docker, реверс-прокси CADDY В HOST-РЕЖИМЕ
+  (не nginx!), конфиг /home/deploy/app/Caddyfile (чужие app-* контейнеры —
+  НЕ ТРОГАТЬ). Наш блок добавлен в конец Caddyfile (handle /api/* →
+  strip_prefix → localhost:8010, flush_interval -1 для SSE; / →
+  localhost:3010), TLS Caddy получает сам, бэкап Caddyfile.bak-pir
+- Перенос: свежий дамп прод-БД + uploads (volume) со старого; /opt/pir/.env
+  скопирован (те же DB_PASSWORD/JWT). deploy-pir + тот же ключ. CI/CD:
+  host в deploy.yml → 155.212.230.118, деплой прошёл
+- Прод проверен: login/api 200, админ входит, МОДЕЛИ OPENROUTER: 260 ✓
+  (эндпоинт фильтрует supported_parameters=tools). ВНИМАНИЕ: локальный
+  DNS-кэш может держать старый IP — проверять с --resolve
+- Старый сервер вычищен: контейнеры+volumes (down -v), nginx-конфиг,
+  сертификат, /opt/pir, deploy-pir, образы. Чужие сайты живы (hollygar 200)
