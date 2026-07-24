@@ -110,6 +110,21 @@ export default function CalcWorkspacePage() {
     pollRef.current = null
   }, [])
 
+  // авторасчёт: цены видны сразу, без ручного «Рассчитать»
+  const autoCompute = useCallback(async () => {
+    setComputing(true)
+    try {
+      const r = await computeCalculation(Number(id), Number(calcId))
+      setCalcResult(r)
+      getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks).catch(() => {})
+      refreshMeta().catch(() => {})
+    } catch {
+      // не смогли — цены появятся после ручного «Пересчитать»
+    } finally {
+      setComputing(false)
+    }
+  }, [id, calcId, refreshMeta])
+
   const finishExtraction = useCallback(async () => {
     const c = await getCalculation(Number(id), Number(calcId))
     setCalc(c)
@@ -123,7 +138,10 @@ export default function CalcWorkspacePage() {
     setCalcResult(c.calculation_result ?? null)
     setExtracting(false)
     getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks).catch(() => {})
-  }, [id, calcId])
+    if (!c.calculation_result && (c.extracted_entities?.entities?.length ?? 0) > 0) {
+      autoCompute()
+    }
+  }, [id, calcId, autoCompute])
 
   const beginPolling = useCallback(() => {
     stopPolling()
@@ -179,6 +197,7 @@ export default function CalcWorkspacePage() {
       const hasEntities = (c.extracted_entities?.entities?.length ?? 0) > 0
       if (hasEntities) {
         getUnitCheck(Number(id), Number(calcId)).then(setUnitChecks).catch(() => {})
+        if (!c.calculation_result && m?.status !== 'final') autoCompute()
       } else if (m?.status !== 'final' && !extractStartedRef.current) {
         extractStartedRef.current = true
         // анализ мог уже идти в фоне — тогда продолжаем опрос, иначе стартуем
@@ -276,7 +295,7 @@ export default function CalcWorkspacePage() {
   }
 
   async function handleFinalize() {
-    if (!confirm('Применить и заморозить расчёт? Будут сформированы файлы 2ПС и КП; правки — только в новой версии.')) return
+    if (!confirm('Финализировать расчёт? Версия будет заморожена, будут сформированы файлы 2ПС и КП; правки — только в новой версии.')) return
     setFinalizing(true); setCalcError('')
     try {
       await savePendingOverrides()
@@ -608,7 +627,7 @@ export default function CalcWorkspacePage() {
                           )}
                           <div style={{ display: 'flex', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
                             <Button variant="primary" size="sm" disabled={clarifyBusy} onClick={handleClarifyApply}>
-                              {clarifyBusy ? 'Применение…' : 'Применить уточнение'}
+                              {clarifyBusy ? 'Применение…' : 'Подтвердить'}
                             </Button>
                             <Button variant="ghost" size="sm" disabled={clarifyBusy} onClick={() => setClarifyDiff(null)}>
                               Отмена
@@ -619,7 +638,7 @@ export default function CalcWorkspacePage() {
                     ) : (
                       <div>
                         <Button variant="secondary" size="sm" disabled={clarifyBusy || !clarifyText.trim()} onClick={handleClarifyPreview}>
-                          {clarifyBusy ? 'AI анализирует…' : 'Проверить уточнение'}
+                          {clarifyBusy ? 'AI анализирует…' : 'Применить уточнения'}
                         </Button>
                       </div>
                     )}
@@ -630,11 +649,11 @@ export default function CalcWorkspacePage() {
                 {!readOnly && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', paddingBottom: 8 }}>
                     <Button variant={calcResult ? 'secondary' : 'primary'} disabled={computing || finalizing} onClick={handleCompute}>
-                      {computing ? 'Расчёт…' : calcResult ? '↻ Пересчитать' : 'Рассчитать'}
+                      {computing ? 'Расчёт…' : '↻ Пересчитать'}
                     </Button>
                     {calcResult && (
                       <Button variant="primary" disabled={finalizing || computing} onClick={handleFinalize}>
-                        {finalizing ? 'Применение…' : '✓ Применить'}
+                        {finalizing ? 'Финализация…' : '✓ Финализировать расчёт'}
                       </Button>
                     )}
                   </div>
