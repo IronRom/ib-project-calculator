@@ -630,29 +630,31 @@ def generate_kp_pdf(
     for note in _KP_NOTES:
         story.append(Paragraph(f"• {note}", style(leading=18)))
         story.append(Spacer(1, 0.15*cm))
-    story.append(Spacer(1, 0.85*cm))
+    story.append(Spacer(1, 0.3*cm))
 
     # ── Signature block ───────────────────────────────────────────────────────
-    left_text = Paragraph(
-        "С уважением,<br/>Генеральный директор<br/>ООО «Интеллект-строй»",
-        style(bold=True, leading=18),
-    )
-    sig_img: Any = ""
+    # kp_signature.png — ГОТОВЫЙ блок целиком («С уважением…» + печать +
+    # росчерк + ФИО). Рисуем только его, в родных пропорциях на всю ширину —
+    # дублирующий текст по бокам и принудительные 6×4 см искажали блок.
     if _SIGNATURE_IMG.exists():
-        sig_img = RLImage(str(_SIGNATURE_IMG), width=6*cm, height=4*cm)
-
-    right_text = Paragraph("И. А. Подопригора", style(bold=True, align=TA_RIGHT))
-
-    sig_data = [[left_text, sig_img, right_text]]
-    # 5.5 + 6 + 5 = 16.5cm = A4 - margins
-    sig_table = Table(sig_data, colWidths=[5.5*cm, 6*cm, 5*cm])
-    sig_table.setStyle(TableStyle([
-        ("BOX",       (0, 0), (-1, -1), 0, colors.white),
-        ("INNERGRID", (0, 0), (-1, -1), 0, colors.white),
-        ("VALIGN",    (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN",     (2, 0), (2, 0), "RIGHT"),
-    ]))
-    story.append(sig_table)
+        from reportlab.lib.utils import ImageReader
+        iw, ih = ImageReader(str(_SIGNATURE_IMG)).getSize()
+        sig_w = 11 * cm  # как в эталонном письме; высота ≈ 4,1 см
+        sig = RLImage(str(_SIGNATURE_IMG), width=sig_w, height=sig_w * ih / iw)
+        sig.hAlign = "LEFT"
+        story.append(sig)
+    else:
+        left_text = Paragraph(
+            "С уважением,<br/>Генеральный директор<br/>ООО «Интеллект-строй»",
+            style(bold=True, leading=18),
+        )
+        right_text = Paragraph("И. А. Подопригора", style(bold=True, align=TA_RIGHT))
+        sig_table = Table([[left_text, right_text]], colWidths=[11.5*cm, 5*cm])
+        sig_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN",  (1, 0), (1, 0), "RIGHT"),
+        ]))
+        story.append(sig_table)
 
     doc.build(story)
     buf.seek(0)
