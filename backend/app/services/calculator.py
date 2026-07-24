@@ -865,12 +865,20 @@ def _calculate_asutp_position(
 def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     entities = [e for e in entities_dict.get("entities", []) if not e.get("deleted", False)]
 
-    stage        = entities_dict.get("stage", "П+Р")
+    stage        = entities_dict.get("stage") or "П+Р"  # нет стадий в ТЗ → обе
     stage_factor = STAGE_FACTORS.get(stage, 1.0)
 
     positions = []
     errors = []
     warnings: list[str] = []
+
+    if stage in ("П", "Р"):
+        only, other = (("ПД", "рабочая"), ("РД", "проектная"))[stage == "Р"]
+        warnings.append(
+            f"Расчёт выполнен ТОЛЬКО для стадии {only} — {other} документация "
+            f"не включена в смету. Если по ТЗ требуются обе стадии, "
+            f"переключите «Стадии» на ПД+РД"
+        )
 
     for entity in entities:
         sbts_code      = entity.get("sbts_code", "")
