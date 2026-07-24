@@ -69,6 +69,17 @@ jobs:
     needs: [build-backend, build-frontend, build-bot]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      # Держим compose на сервере в синхроне с репо (иначе новые сервисы
+      # вроде bot не попадают на прод — они добавляются только в репо-файл)
+      - name: Sync compose to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 155.212.230.118
+          username: deploy-pir
+          key: ${{ secrets.PROD_SSH_KEY }}
+          source: docker-compose.prod.yml
+          target: /opt/pir
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1
         with:
