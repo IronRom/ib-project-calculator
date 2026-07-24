@@ -5,7 +5,8 @@ import datetime
 import io
 import os
 from pathlib import Path
-from typing import Any
+from xml.sax.saxutils import escape as xml_escape
+from typing import Any, Optional
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -160,6 +161,41 @@ def _add_run(para: Any, text: str, bold: bool = False, italic: bool = False,
     return run
 
 
+# Строки КП, к которым добавляется краткий перечень работ
+_SCOPED_LINES = {"Разработка проектной документации", "Разработка рабочей документации"}
+
+
+def _scope_lines(entities: Optional[list] = None) -> list[str]:
+    """Краткое пояснение «к чему» для строк ПД/РД — по образцу смет Александрова.
+
+    Этапы из ТЗ (section_num/section_name), если заданы; иначе перечень
+    объектов проектирования. Кап на 6 пунктов, чтобы КП оставалось на страницу.
+    """
+    if not entities:
+        return []
+    ents = [e for e in entities if not e.get("deleted")]
+    stages: dict[int, str] = {}
+    for e in ents:
+        n = e.get("section_num") or 0
+        name = (e.get("section_name") or "").strip()
+        if n > 0 and name:
+            stages.setdefault(n, name)
+    if stages:
+        import re
+        return [name if re.match(r"(?i)^этап\s*\d", name) else f"Этап {n}: {name}"
+                for n, name in sorted(stages.items())]
+    names: list[str] = []
+    for e in ents:
+        nm = (e.get("object_name") or e.get("object_type") or "").strip()
+        if nm and nm not in names:
+            names.append(nm)
+    cap = 6
+    out = names[:cap]
+    if len(names) > cap:
+        out.append(f"и ещё {len(names) - cap} поз.")
+    return out
+
+
 # Оговорки под таблицей КП — единые для Word и PDF версий
 _KP_NOTES = [
     "Данное коммерческое предложение действует в течении 15 (пятнадцати) рабочих дней.",
@@ -220,6 +256,7 @@ def generate_kp_word(
     result: dict[str, Any],
     tz_object_name: str = "",
     company_name: str = "",
+    entities: Optional[list] = None,
 ) -> bytes:
     """Generate КП Word document matching the corporate template."""
     obj_name = tz_object_name.strip() or project_name
@@ -322,6 +359,7 @@ def generate_kp_word(
         _set_cell_shading(cell, "D9D9D9")
 
     # Data rows
+    scope = _scope_lines(entities)
     for num, (name, cost) in enumerate(lines, 1):
         row = table.add_row()
         for ci, (cell, text) in enumerate(zip(row.cells, [str(num), name, _fmt(cost)])):
@@ -332,6 +370,14 @@ def generate_kp_word(
             r.font.size = Pt(11)
             r.font.name = "Times New Roman"
             _set_cell_borders(cell)
+            # краткий перечень работ под названием строки ПД/РД
+            if ci == 1 and name in _SCOPED_LINES and scope:
+                for s in scope:
+                    sp = cell.add_paragraph()
+                    sr = sp.add_run(f"– {s}")
+                    sr.italic = True
+                    sr.font.size = Pt(9)
+                    sr.font.name = "Times New Roman"
 
     # НДС row
     vat_row = table.add_row()
@@ -439,6 +485,7 @@ def generate_kp_pdf(
     result: dict[str, Any],
     tz_object_name: str = "",
     company_name: str = "",
+    entities: Optional[list] = None,
 ) -> bytes:
     """Generate КП as PDF matching the corporate template."""
     from reportlab.platypus import (
@@ -545,10 +592,15 @@ def generate_kp_pdf(
             Paragraph(f"Сумма, с НДС\n{vat_pct}%", th_style),
         ]
     ]
+    scope = _scope_lines(entities)
     for num, (name, cost) in enumerate(lines, 1):
+        name_html = xml_escape(name)
+        if name in _SCOPED_LINES and scope:
+            details = "<br/>".join(f"– {xml_escape(s)}" for s in scope)
+            name_html += f'<br/><font size="9"><i>{details}</i></font>'
         table_data.append([
             Paragraph(str(num), style(align=TA_CENTER, size=11)),
-            Paragraph(name, td_style),
+            Paragraph(name_html, td_style),
             Paragraph(_fmt(cost), td_right),
         ])
     table_data.append([

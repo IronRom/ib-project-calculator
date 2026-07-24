@@ -686,6 +686,7 @@ def export_kp(
         stage=stage,
         result=calc.calculation_result,
         tz_object_name=tz_object_name,
+        entities=entities.get("entities"),
     )
 
     safe_name = urllib.parse.quote(f"КП_{project.name}.docx")
@@ -721,6 +722,7 @@ def export_kp_pdf(
         stage=stage,
         result=calc.calculation_result,
         tz_object_name=tz_object_name,
+        entities=entities.get("entities"),
     )
 
     safe_name = urllib.parse.quote(f"КП_{project.name}.pdf")
@@ -934,11 +936,13 @@ def finalize_calculation(
         ("kp_docx", f"КП_{project.name}_v{calc.version_num}.docx",
          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
          lambda: generate_kp_word(project_name=project.name, stage=stage,
-                                  result=result, tz_object_name=tz_object_name)),
+                                  result=result, tz_object_name=tz_object_name,
+                                  entities=ee.get("entities"))),
         ("kp_pdf", f"КП_{project.name}_v{calc.version_num}.pdf",
          "application/pdf",
          lambda: generate_kp_pdf(project_name=project.name, stage=stage,
-                                 result=result, tz_object_name=tz_object_name)),
+                                 result=result, tz_object_name=tz_object_name,
+                                 entities=ee.get("entities"))),
     ]
     # пере-финализация той же версии невозможна (_ensure_draft), но чистим
     # возможные хвосты от прошлых неудачных попыток
