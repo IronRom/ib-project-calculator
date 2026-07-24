@@ -284,7 +284,7 @@ function CalcTile({ calc: c, num, onOpen, onDownload, onNewVersion }: {
       </div>
 
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>
-        №{c.id} · v{c.version_num} · {new Date(c.created_at).toLocaleDateString('ru-RU')}
+        {c.version_num > 1 ? `v${c.version_num} · ` : ''}{new Date(c.created_at).toLocaleDateString('ru-RU')}
       </div>
 
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 600, color: c.total_with_vat != null ? 'var(--fg-1)' : 'var(--fg-4)' }}>

@@ -366,7 +366,9 @@ export default function CalcWorkspacePage() {
   return (
     <>
       <Topbar
-        title={meta ? `Расчёт №${meta.id}` : 'Расчёт'}
+        title={meta
+          ? `Расчёт от ${new Date(meta.created_at).toLocaleDateString('ru-RU')}${meta.version_num > 1 ? ` · v${meta.version_num}` : ''}`
+          : 'Расчёт'}
         breadcrumb={project ? `Проекты / ${project.name}` : 'Проекты'}
         actions={
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
