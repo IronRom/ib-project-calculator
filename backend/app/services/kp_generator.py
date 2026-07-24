@@ -168,8 +168,8 @@ _SCOPED_LINES = {"Разработка проектной документаци
 def _scope_lines(entities: Optional[list] = None) -> list[str]:
     """Краткое пояснение «к чему» для строк ПД/РД — по образцу смет Александрова.
 
-    Этапы из ТЗ (section_num/section_name), если заданы; иначе перечень
-    объектов проектирования. Кап на 6 пунктов, чтобы КП оставалось на страницу.
+    Этапы из ТЗ (section_num/section_name), если заданы; иначе полный
+    перечень объектов проектирования.
     """
     if not entities:
         return []
@@ -189,11 +189,7 @@ def _scope_lines(entities: Optional[list] = None) -> list[str]:
         nm = (e.get("object_name") or e.get("object_type") or "").strip()
         if nm and nm not in names:
             names.append(nm)
-    cap = 6
-    out = names[:cap]
-    if len(names) > cap:
-        out.append(f"и ещё {len(names) - cap} поз.")
-    return out
+    return names
 
 
 # Оговорки под таблицей КП — единые для Word и PDF версий

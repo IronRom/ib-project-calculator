@@ -628,6 +628,11 @@ export function clarifyCalc(projectId: number, calcId: number, text: string, pre
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, preview }) })
 }
 
+export function patchStage(projectId: number, calcId: number, stage: 'П' | 'Р' | 'П+Р') {
+  return request<{ stage: string }>(`/projects/${projectId}/calculations/${calcId}/stage`,
+    { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stage }) })
+}
+
 export function finalizeCalc(projectId: number, calcId: number) {
   return request<{ status: string; total_with_vat: number; exports: { kind: string; filename: string }[]; warnings: string[] }>(
     `/projects/${projectId}/calculations/${calcId}/finalize`, { method: 'POST' })

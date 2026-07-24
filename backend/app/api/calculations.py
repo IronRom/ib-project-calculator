@@ -814,6 +814,29 @@ def list_calculations(
     return out
 
 
+@router.patch("/{calc_id}/stage")
+def patch_stage(
+    project_id: int,
+    calc_id: int,
+    body: dict,
+    current_user: User = Depends(require_calculate),
+    db: Session = Depends(get_db),
+):
+    """Ручная смена стадий проектирования (П / Р / П+Р) у черновика."""
+    from sqlalchemy.orm.attributes import flag_modified
+    _, calc = _get_calc(project_id, calc_id, current_user.id, db)
+    _ensure_draft(calc)
+    stage = (body.get("stage") or "").strip()
+    if stage not in ("П", "Р", "П+Р"):
+        raise HTTPException(status_code=422, detail="stage должен быть П, Р или П+Р")
+    ee = calc.extracted_entities or {}
+    ee["stage"] = stage
+    calc.extracted_entities = ee
+    flag_modified(calc, "extracted_entities")
+    db.commit()
+    return {"stage": stage}
+
+
 @router.post("/{calc_id}/versions", status_code=201)
 def create_version(
     project_id: int,

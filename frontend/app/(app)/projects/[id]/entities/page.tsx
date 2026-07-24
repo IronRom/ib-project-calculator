@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import {
-  getCalculation, getProject, computeCalculation, patchEntity,
+  getCalculation, getProject, computeCalculation, patchEntity, patchStage,
   getUnitCheck, startExtractionJob, getExtractionStatus, listCalculations,
   clarifyCalc, finalizeCalc, createVersion, downloadExportFile,
   Calculation, ExtractedEntity, CalculationResult,
@@ -95,6 +95,7 @@ export default function CalcWorkspacePage() {
   const [clarifyDiff, setClarifyDiff] = useState<ClarifyDiff | null>(null)
 
   const [finalizing, setFinalizing] = useState(false)
+  const [stageBusy, setStageBusy] = useState(false)
 
   const readOnly = meta?.status === 'final'
 
@@ -291,6 +292,21 @@ export default function CalcWorkspacePage() {
       setCalcError(e instanceof Error ? e.message : 'Ошибка применения уточнения')
     } finally {
       setClarifyBusy(false)
+    }
+  }
+
+  async function handleStageChange(s: 'П' | 'Р' | 'П+Р') {
+    if (stageBusy || computing || calc?.extracted_entities?.stage === s) return
+    setStageBusy(true); setCalcError('')
+    try {
+      await patchStage(Number(id), Number(calcId), s)
+      const c = await getCalculation(Number(id), Number(calcId))
+      setCalc(c)
+      await autoCompute()
+    } catch (e: unknown) {
+      setCalcError(e instanceof Error ? e.message : 'Ошибка смены стадии')
+    } finally {
+      setStageBusy(false)
     }
   }
 
@@ -492,6 +508,37 @@ export default function CalcWorkspacePage() {
             {/* ═══ Вкладка «Объекты ПИР» ═══ */}
             {tab === 'objects' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Стадии проектирования: определены AI из ТЗ, редактируются вручную */}
+                {!readOnly && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Стадии:</span>
+                    <div style={{ display: 'inline-flex', border: '1px solid var(--border-default)', borderRadius: 6, overflow: 'hidden' }}>
+                      {([['П', 'ПД'], ['П+Р', 'ПД+РД'], ['Р', 'РД']] as const).map(([val, lbl]) => {
+                        const active = (result?.stage ?? 'П+Р') === val
+                        return (
+                          <button
+                            key={val}
+                            disabled={stageBusy || computing}
+                            onClick={() => handleStageChange(val)}
+                            style={{
+                              padding: '5px 14px', fontSize: 12, fontWeight: active ? 600 : 400,
+                              background: active ? 'var(--accent)' : 'transparent',
+                              color: active ? 'var(--accent-fg)' : 'var(--fg-2)',
+                              border: 'none', cursor: active ? 'default' : 'pointer',
+                              fontFamily: 'var(--font-mono)',
+                            }}
+                          >{lbl}</button>
+                        )
+                      })}
+                    </div>
+                    {stageBusy && <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>пересчёт…</span>}
+                    {!stageBusy && (
+                      <span style={{ fontSize: 11, color: 'var(--fg-4)' }}>
+                        определено AI из ТЗ — проверьте (влияет на 40/60% цены)
+                      </span>
+                    )}
+                  </div>
+                )}
                 {dirty && (
                   <div style={{ fontSize: 12, color: 'var(--warning-400)', fontFamily: 'var(--font-mono)' }}>
                     ● есть изменения — нажмите «Пересчитать»
