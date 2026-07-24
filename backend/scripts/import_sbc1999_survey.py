@@ -49,9 +49,13 @@ _COEF_RE = re.compile(r"коэффициент[а-я]*\s+(\d+[.,]\d+)|К\s*=\s*(
 
 
 def _num(v):
+    """Число или None. Формульные цены («80 руб. + 3%…») — не числа."""
     if v is None:
         return None
-    return float(str(v).replace(",", "."))
+    try:
+        return float(str(v).replace(",", "."))
+    except ValueError:
+        return None
 
 
 def _category(title: str, col_label: str = "") -> str:
@@ -136,6 +140,16 @@ def import_book(db, key: str, json_path: str) -> None:
                 else:
                     price = _num(v)
                     if price is None:
+                        # формульная цена текстом → условие-примечание таблицы
+                        if isinstance(v, str) and v.strip():
+                            db.add(BookCondition(
+                                book_version_id=book.id, table_num=tn,
+                                condition_short=f"§{par} {name[:200]}: {v}"[:500],
+                                condition_text_full=f"Табл.{tn} §{par} {name}: {v}",
+                                effect_type="flag",
+                                coeff_min=None, coeff_max=None, coeff_key=None,
+                            ))
+                            n_cond += 1
                         continue
                     pairs = [(cats[0], price)]
                 for cat, price in pairs:
