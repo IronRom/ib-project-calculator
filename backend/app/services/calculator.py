@@ -714,6 +714,8 @@ def _calculate_asutp_position(
         raise ValueError(f"Модули АСУТП не найдены для {book.code}")
 
     total_base_thous = 0.0
+    pd_base_thous = 0.0   # разложение цены на ПД/РД по стадийным долям модулей —
+    rd_base_thous = 0.0   # нужно КП, где АСУТП растворяется в строках ПД/РД
     module_results = []
 
     _MODULE_ATTR = {"ОР": "or", "ОО": "oo", "ИО": "io", "ТО": "to", "МО": "mo", "ПО": "po"}
@@ -748,6 +750,11 @@ def _calculate_asutp_position(
         s = float(mod.s_value)
         module_cost_thous = total_score * s * asutp_k * pct
         total_base_thous += module_cost_thous
+        p_share = float(mod.stage_p_min or 0)
+        r_share = float(mod.stage_r_min or 0)
+        if p_share + r_share > 0:
+            pd_base_thous += module_cost_thous * p_share / (p_share + r_share)
+            rd_base_thous += module_cost_thous * r_share / (p_share + r_share)
         module_results.append({
             "module": mod.module_code, "score": total_score,
             "s": s, "pct": pct, "cost_thous": module_cost_thous,
@@ -833,6 +840,11 @@ def _calculate_asutp_position(
         "section_name":              entity.get("section_name", ""),
         "_stage_embedded":           True,   # stage% already applied per-module
         "_asutp_modules":            module_results,
+        # доля ПД в цене позиции: при стадии П вся цена — ПД, при Р — РД,
+        # при П+Р — взвешенно по стадийным долям модулей
+        "_kp_pd_frac": (1.0 if stage == "П" else 0.0 if stage == "Р"
+                        else (pd_base_thous / (pd_base_thous + rd_base_thous)
+                              if (pd_base_thous + rd_base_thous) > 0 else 0.4)),
     }
 
 

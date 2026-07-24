@@ -160,24 +160,39 @@ def _add_run(para: Any, text: str, bold: bool = False, italic: bool = False,
     return run
 
 
+# Оговорки под таблицей КП — единые для Word и PDF версий
+_KP_NOTES = [
+    "Данное коммерческое предложение действует в течении 15 (пятнадцати) рабочих дней.",
+    "Состав и содержание документации — в соответствии с Постановлением "
+    "Правительства РФ №87 и заданием на проектирование.",
+    "В стоимость не включены (если иное не указано выше): услуги и государственная "
+    "пошлина органов экспертизы, получение исходно-разрешительной документации, "
+    "авторский надзор за строительством.",
+]
+
+
 def _build_kp_lines(result: dict[str, Any]) -> list[tuple[str, float]]:
     """Build КП table lines (name, cost_with_vat) from calculation positions.
 
-    Sums actual position costs by stage_label — respects per-book ПД/РД
-    distribution and per-entity section % overrides. Stage-embedded positions
-    (изыскания, АСУТП) are grouped by their section_name.
+    Структура по образцу эталонных КП: блок изысканий одной строкой +
+    «Разработка ПД» / «Разработка РД». АСУ ТП — марка внутри ПД/РД, не
+    самостоятельный результат ПИР: позиция АСУТП (факторный метод, стадийность
+    встроена в цену) растворяется в строках ПД/РД по долям модулей
+    (_kp_pd_frac из калькулятора). Прочие stage-embedded позиции — изыскания.
     """
-    from collections import defaultdict
-
     positions = result.get("positions", [])
     vat_rate = (result.get("vat_rate") or 22) / 100
 
-    embedded_groups: dict[str, float] = defaultdict(float)
-    pd_cost = rd_cost = other_cost = 0.0
+    survey_cost = pd_cost = rd_cost = other_cost = 0.0
     for p in positions:
         c = float(p.get("cost", 0))
         if p.get("_stage_embedded"):
-            embedded_groups[p.get("section_name") or "Инженерные изыскания"] += c
+            frac = p.get("_kp_pd_frac")
+            if frac is not None:
+                pd_cost += c * float(frac)
+                rd_cost += c * (1 - float(frac))
+            else:
+                survey_cost += c
         elif p.get("stage_label") == "ПД":
             pd_cost += c
         elif p.get("stage_label") == "РД":
@@ -186,8 +201,8 @@ def _build_kp_lines(result: dict[str, Any]) -> list[tuple[str, float]]:
             other_cost += c
 
     lines: list[tuple[str, float]] = []
-    for label, scost in embedded_groups.items():
-        lines.append((label, scost * (1 + vat_rate)))
+    if survey_cost:
+        lines.append(("Инженерные изыскания", survey_cost * (1 + vat_rate)))
     if pd_cost:
         lines.append(("Разработка проектной документации", pd_cost * (1 + vat_rate)))
     if rd_cost:
@@ -344,14 +359,13 @@ def generate_kp_word(
 
     doc.add_paragraph().paragraph_format.space_after = Pt(4)
 
-    # ── Validity bullet ───────────────────────────────────────────────────────
-    bullet = doc.add_paragraph(style='List Bullet')
-    bullet.paragraph_format.space_after = Pt(12)
-    r = bullet.add_run(
-        "Данное коммерческое предложение действует в течении 15 (пятнадцати) рабочих дней."
-    )
-    r.font.size = Pt(12)
-    r.font.name = "Times New Roman"
+    # ── Оговорки ──────────────────────────────────────────────────────────────
+    for i, note in enumerate(_KP_NOTES):
+        bullet = doc.add_paragraph(style='List Bullet')
+        bullet.paragraph_format.space_after = Pt(12 if i == len(_KP_NOTES) - 1 else 4)
+        r = bullet.add_run(note)
+        r.font.size = Pt(12)
+        r.font.name = "Times New Roman"
 
     # ── Signature placeholder (no image — signed version is PDF only) ────────
     sig_p = doc.add_paragraph()
@@ -560,12 +574,11 @@ def generate_kp_pdf(
     story.append(cost_table)
     story.append(Spacer(1, 0.4*cm))
 
-    # ── Validity bullet ───────────────────────────────────────────────────────
-    story.append(Paragraph(
-        "• Данное коммерческое предложение действует в течении 15 (пятнадцати) рабочих дней.",
-        style(leading=18),
-    ))
-    story.append(Spacer(1, 1.0*cm))
+    # ── Оговорки ──────────────────────────────────────────────────────────────
+    for note in _KP_NOTES:
+        story.append(Paragraph(f"• {note}", style(leading=18)))
+        story.append(Spacer(1, 0.15*cm))
+    story.append(Spacer(1, 0.85*cm))
 
     # ── Signature block ───────────────────────────────────────────────────────
     left_text = Paragraph(
