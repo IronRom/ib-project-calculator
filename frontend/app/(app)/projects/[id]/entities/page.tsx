@@ -558,7 +558,9 @@ export default function CalcWorkspacePage() {
                 {calcResult && (
                   <div style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <TotalRow label="Базовая стоимость" value={fmt(calcResult.base_cost)} />
-                    <TotalRow label={`Индекс пересчёта (${calcResult.price_index_period})`} value={`× ${calcResult.price_index}`} />
+                    {calcResult.price_index != null && (
+                      <TotalRow label={`Индекс пересчёта (${calcResult.price_index_period})`} value={`× ${calcResult.price_index}`} />
+                    )}
                     {calcResult.stage_factor !== 1 && (
                       <TotalRow label={`Доля стадии ${calcResult.stage}`} value={`× ${calcResult.stage_factor}`} />
                     )}
@@ -648,7 +650,11 @@ export default function CalcWorkspacePage() {
                 {/* Действия */}
                 {!readOnly && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', paddingBottom: 8 }}>
-                    <Button variant={calcResult ? 'secondary' : 'primary'} disabled={computing || finalizing} onClick={handleCompute}>
+                    <Button
+                      variant="secondary"
+                      disabled={computing || finalizing || !dirty}
+                      onClick={handleCompute}
+                    >
                       {computing ? 'Расчёт…' : '↻ Пересчитать'}
                     </Button>
                     {calcResult && (
