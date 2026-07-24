@@ -18,6 +18,11 @@ services:
   backend:
     image: ghcr.io/ironrom/ib-pir-backend:latest
     restart: unless-stopped
+    # Надёжный DNS для контейнера: резолвер хоста (198.18.18.18) периодически
+    # не резолвит внешние хосты (openrouter/ghcr) — пинним публичные напрямую
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
     environment:
       DATABASE_URL: postgresql://pir_user:${DB_PASSWORD}@db:5432/pir_calc
@@ -43,6 +48,10 @@ services:
   bot:
     image: ghcr.io/ironrom/ib-pir-bot:latest
     restart: unless-stopped
+    # Боту критично резолвить api.telegram.org — не полагаемся на хостовый DNS
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       BACKEND_URL: http://backend:8000
@@ -55,6 +64,9 @@ services:
   frontend:
     image: ghcr.io/ironrom/ib-pir-frontend:latest
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       NEXT_PUBLIC_API_URL: https://pir.i-build.tech/api
     ports:

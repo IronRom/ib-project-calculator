@@ -662,3 +662,19 @@ ws-черновиков старых СБЦП. Точные коды из эта
   TELEGRAM_BOT_TOKEN / BOT_API_SECRET / TELEGRAM_BOT_USERNAME (иначе бот и
   ручки resolve/link мертвы). ОДИН поллер на токен — локальный бот погасить
   перед прод-деплоем (Telegram 409 Conflict)
+
+### 2026-07-24 (продолжение — выбор модели, DNS прода)
+- Бенчмарк 8 моделей на Котельной (полный пайплайн): qwen3.7-plus давал ту же
+  полноту, что gemini-3.6-flash/sonnet, но 678с против 51-59с (×11 медленнее) —
+  ЭТО причина «анализ идёт 30 минут». Прод переключён на anthropic/claude-sonnet-5
+  (extraction+clarification в app_settings). Полнота = главный дифференциатор,
+  скорость sonnet-5 ~1 мин
+- _call: кап 2×120с (было 3×180с=9мин); _call_plain: `.get(content) or ""`
+  (content=null у некоторых моделей ронял raw.split — NoneType)
+- DNS прода: резолвер хоста 198.18.18.18 периодически не резолвит внешние хосты
+  (github/telegram/ghcr → фейл pull и риск отвала бота от Telegram). Фикс:
+  (1) /etc/resolv.conf += nameserver 1.1.1.1/8.8.8.8 (fallback, 198 остаётся);
+  (2) `dns: [1.1.1.1,8.8.8.8]` на backend/bot/frontend в docker-compose.prod.yml
+  (durable, не зависит от сброса хостового resolv.conf). Бот резолвит telegram, polling ок
+- Грабли CI: deploy пулит образы НА сервере (drone-ssh) → зависит от DNS прода;
+  при флапе резолвера job падает на blob pull. Лечится фиксом DNS выше
