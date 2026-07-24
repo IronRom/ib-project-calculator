@@ -325,6 +325,8 @@ export default function CalcWorkspacePage() {
     if (!rows.length) return null
     return rows.reduce((s, p) => s + p.cost, 0)
   }
+  const usedMinimumFor = (gi: number): boolean =>
+    !!calcResult?.positions.some(p => p.num === gi + 1 && p.used_minimum)
 
   // «Нет X: …» из ТЗ считаем решённым, когда у соответствующей позиции X заполнен
   const missingItems = (result?.missing_data ?? []).map((m) => {
@@ -492,6 +494,7 @@ export default function CalcWorkspacePage() {
                         override={overrides[gi] ?? {}}
                         deleted={isDeleted(gi)}
                         cost={costFor(gi)}
+                        usedMinimum={usedMinimumFor(gi)}
                         stage={result?.stage}
                         readOnly={readOnly}
                         onOverride={(patch) => applyOverride(gi, patch)}
@@ -520,6 +523,7 @@ export default function CalcWorkspacePage() {
                         override={overrides[gi] ?? {}}
                         deleted={isDeleted(gi)}
                         cost={costFor(gi)}
+                        usedMinimum={usedMinimumFor(gi)}
                         stage={result?.stage}
                         readOnly={readOnly}
                         warn
@@ -686,13 +690,14 @@ export default function CalcWorkspacePage() {
 }
 
 // ── Карточка позиции ──────────────────────────────────────────────────────────
-function EntityCard({ num, entity, unitCheck, override, deleted, cost, stage, readOnly, warn, onOverride }: {
+function EntityCard({ num, entity, unitCheck, override, deleted, cost, usedMinimum, stage, readOnly, warn, onOverride }: {
   num: number
   entity: ExtractedEntity
   unitCheck?: UnitCheckItem
   override: EntityOverride
   deleted: boolean
   cost: number | null
+  usedMinimum?: boolean
   stage?: string
   readOnly: boolean
   warn?: boolean
@@ -738,6 +743,7 @@ function EntityCard({ num, entity, unitCheck, override, deleted, cost, stage, re
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)' }}>№{num}</span>
         <Chip tone={tone}>{label}</Chip>
         {(entity.confidence ?? 1) < 0.7 && <Chip tone="warning">AI {Math.round((entity.confidence ?? 0) * 100)}%</Chip>}
+        {usedMinimum && !deleted && <Chip tone="warning">X условный</Chip>}
         <span style={{ flex: 1 }} />
         {!readOnly && (
           deleted ? (
@@ -781,8 +787,13 @@ function EntityCard({ num, entity, unitCheck, override, deleted, cost, stage, re
           <span
             onClick={startEdit}
             title={xMissing ? (entity.x_value_missing_reason ?? 'Не указано в ТЗ') : readOnly ? undefined : 'Нажмите для редактирования'}
-            style={{
-              cursor: (readOnly || deleted) ? 'default' : 'pointer',
+            style={readOnly ? {
+              // финал: X — просто текст, без намёка на редактируемость
+              fontFamily: 'var(--font-mono)', fontSize: 13, padding: '3px 0',
+              color: xMissing ? 'var(--fg-3)' : 'var(--fg-1)',
+              ...strike,
+            } : {
+              cursor: deleted ? 'default' : 'pointer',
               fontFamily: 'var(--font-mono)', fontSize: 13,
               padding: '3px 10px', borderRadius: 4,
               background: xMissing ? 'color-mix(in srgb, var(--warning-500) 15%, transparent)' : 'var(--bg-raised)',
@@ -791,7 +802,7 @@ function EntityCard({ num, entity, unitCheck, override, deleted, cost, stage, re
               ...strike,
             }}
           >
-            {xMissing ? '⚠ указать' : effX!.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+            {xMissing ? (readOnly ? '— (условно)' : '⚠ указать') : effX!.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
           </span>
         )}
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)' }}>{effUnit || ''}</span>

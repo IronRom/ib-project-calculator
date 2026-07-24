@@ -270,13 +270,27 @@ def _match_row(
         kw.setdefault("type_fallback", type_fallback)
         return RowMatch(*args, **kw)
 
-    # ── X-fallback: use minimum row when X is unknown ─────────────────────
+    # ── X-fallback: X не указан в ТЗ → УСЛОВНОЕ значение, но никогда не 0 ──
+    # Первая (минимальная) строка таблицы, X = её верхняя граница диапазона;
+    # штучные строки (без диапазона, цена за единицу) → 1 шт.
     if x_value is None:
-        candidates_with_min = [r for r in all_rows if r.x_min is not None]
-        min_row = min(candidates_with_min, key=lambda r: float(r.x_min)) \
-                  if candidates_with_min else all_rows[0]
-        x_eff = float(min_row.x_min) if min_row.x_min is not None else 0.0
-        return _mk(min_row, x_eff, False, None, "", used_minimum=True)
+        def _row_bound(r: ReferenceRow) -> float:
+            if r.x_max is not None:
+                return float(r.x_max)
+            if r.x_min is not None:
+                return float(r.x_min)
+            return float("inf")  # штучные — в конец сортировки
+
+        first_row = min(all_rows, key=_row_bound)
+        if first_row.x_max is not None:
+            x_eff = float(first_row.x_max)
+        elif first_row.x_min is not None:
+            x_eff = float(first_row.x_min)
+        else:
+            x_eff = 1.0  # штучная строка: цена за единицу × 1
+        if x_eff <= 0:
+            x_eff = 1.0
+        return _mk(first_row, x_eff, False, None, "", used_minimum=True)
 
     x_unit_norm = _normalize_unit(x_unit)
 
@@ -1014,14 +1028,18 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             justification += f"; {label} (К={_fmt_ru(_val)})"
         if match.used_minimum:
             missing_hint = entity.get("x_value_missing_reason") or ""
-            justification += f" [по мин. X={_fmt_ru(match.x_effective)}"
+            justification += f" [условный X={_fmt_ru(match.x_effective)}"
             if missing_hint:
                 justification += f"; для точного расчёта: {missing_hint}"
             justification += "]"
+            is_unit_row = row.x_min is None and row.x_max is None
+            basis = ("штучная позиция — принята 1 ед." if is_unit_row
+                     else "верхняя граница первой строки таблицы")
             warnings.append(
-                f"{object_name}: X отсутствует в ТЗ — подставлен минимум таблицы "
-                f"№{table_num} (X={_fmt_ru(match.x_effective)} {row_unit}), цена УСЛОВНАЯ"
-                + (f". {missing_hint}" if missing_hint else "")
+                f"{object_name}: X отсутствует в ТЗ — УСЛОВНО принято "
+                f"X={_fmt_ru(match.x_effective)} {row_unit or 'ед.'} "
+                f"({basis}, табл. №{table_num}), цена ориентировочная"
+                + (f". Для точного расчёта: {missing_hint}" if missing_hint else "")
             )
 
         # ── Formula (расчёт стоимости) ────────────────────────────────────────
