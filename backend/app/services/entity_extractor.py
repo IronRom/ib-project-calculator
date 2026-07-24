@@ -1063,7 +1063,11 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
         budget = max_tokens
         data: dict = {}
         last_err: str = ""
-        MAX_ATTEMPTS = 3
+        # Кап по времени: не тянуть медленные/зависшие вызовы. 2 попытки ×120с
+        # = потолок ~4 мин на _call (было 3×180с = 9 мин). Ретрай — только на
+        # транзиент (сеть/таймаут/429-5xx/битый JSON) или добор бюджета на length.
+        MAX_ATTEMPTS = 2
+        CALL_TIMEOUT = 120
         for attempt in range(MAX_ATTEMPTS):
             payload = {
                 "model": model_id,
@@ -1075,7 +1079,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
                 # that don't support forced function calling.
             }
             try:
-                async with httpx.AsyncClient(timeout=180) as http:
+                async with httpx.AsyncClient(timeout=CALL_TIMEOUT) as http:
                     resp = await http.post(
                         "https://openrouter.ai/api/v1/chat/completions",
                         json=payload,
@@ -1102,12 +1106,14 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
                     f"OpenRouter вернул не-JSON после {MAX_ATTEMPTS} попыток "
                     f"(ct={resp.headers.get('content-type','?')}): {preview}")
             finish = data.get("choices", [{}])[0].get("finish_reason")
-            if finish == "length" and budget == max_tokens:
+            if finish == "length" and budget == max_tokens and attempt < MAX_ATTEMPTS - 1:
                 budget = max_tokens * 4
                 continue
             break
         else:
-            raise ValueError(f"OpenRouter недоступен ({last_err or 'нет ответа'})")
+            # попытки исчерпаны транзиентными сбоями
+            if not data.get("choices"):
+                raise ValueError(f"OpenRouter недоступен ({last_err or 'нет ответа'})")
         return data
 
     async def _call_plain(messages: list[dict], max_tokens: int) -> str:
@@ -1130,7 +1136,9 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
             data = _or_json(resp)
         except Exception:
             return ""
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        # content может быть null (модель вернула только рассуждение/tool_calls);
+        # .get(..., "") НЕ спасает от null — нужен explicit `or ""`
+        return data.get("choices", [{}])[0].get("message", {}).get("content") or ""
 
     # ── Step 0: book detection ────────────────────────────────────────────────
     _progress("Определение применимых справочников…")
