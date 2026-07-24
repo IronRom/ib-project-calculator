@@ -1017,18 +1017,54 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
 
     def _or_error(resp: httpx.Response) -> str:
         try:
-            body = resp.json()
+            body = _or_json(resp)
             return body.get("error", {}).get("message") or resp.text
         except Exception:
             return resp.text
 
+    def _or_json(resp: httpx.Response) -> dict:
+        """Разобрать ответ OpenRouter, устойчиво к SSE keep-alive.
+
+        Для долгих генераций OpenRouter шлёт в тело строки-комментарии SSE
+        (': OPENROUTER PROCESSING') даже при content-type application/json,
+        из-за чего обычный resp.json() падает. Срезаем ведущие comment-строки
+        и парсим первый JSON-объект.
+        """
+        try:
+            return resp.json()
+        except Exception:
+            pass
+        raw = resp.text or ""
+        # выкинуть SSE-комментарии и пустые строки
+        cleaned = "\n".join(
+            ln for ln in raw.splitlines()
+            if ln.strip() and not ln.lstrip().startswith(":")
+        ).strip()
+        # формат SSE: строки вида "data: {...}"
+        if cleaned.startswith("data:"):
+            chunks = [ln[5:].strip() for ln in cleaned.splitlines()
+                      if ln.strip().startswith("data:")]
+            chunks = [c for c in chunks if c and c != "[DONE]"]
+            if chunks:
+                return json.loads(chunks[-1])
+        start = cleaned.find("{")
+        if start >= 0:
+            return json.loads(cleaned[start:])
+        raise ValueError("empty body")
+
     async def _call(messages: list[dict], tools: list, tool_name: str, max_tokens: int) -> dict:
         # Модели пишут текстовое рассуждение перед tool_call; при обрезке по
         # max_tokens провайдер отдаёт tool_call с пустыми аргументами "{}".
-        # Поэтому: finish_reason=length → один ретрай с 4-кратным бюджетом.
+        # Поэтому: finish_reason=length → ретрай с 4-кратным бюджетом.
+        # Плюс: OpenRouter при долгой генерации набивает тело keep-alive
+        # (пробелы/': OPENROUTER PROCESSING'); если генерация оборвалась —
+        # тело = padding + обрезанный JSON, resp.json() падает. Такой сбой
+        # транзиентный → ретраим запрос, а не отдаём ошибку пользователю.
         budget = max_tokens
         data: dict = {}
-        for attempt in range(2):
+        last_err: str = ""
+        MAX_ATTEMPTS = 3
+        for attempt in range(MAX_ATTEMPTS):
             payload = {
                 "model": model_id,
                 "max_tokens": budget,
@@ -1038,24 +1074,40 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
                 # No tool_choice — let the model decide; avoids 404 on providers
                 # that don't support forced function calling.
             }
-            async with httpx.AsyncClient(timeout=180) as http:
-                resp = await http.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    json=payload,
-                    headers=_or_headers(),
-                )
+            try:
+                async with httpx.AsyncClient(timeout=180) as http:
+                    resp = await http.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        json=payload,
+                        headers=_or_headers(),
+                    )
+            except httpx.HTTPError as exc:
+                last_err = f"сеть/таймаут: {exc}"
+                continue  # транзиентная сетевая ошибка → ретрай
             if not resp.is_success:
+                # 429/5xx у OpenRouter обычно транзиентны — ретраим
+                if resp.status_code in (429, 500, 502, 503, 504) and attempt < MAX_ATTEMPTS - 1:
+                    last_err = f"{resp.status_code}: {_or_error(resp)}"
+                    continue
                 raise ValueError(f"OpenRouter {resp.status_code} для модели '{model_id}': {_or_error(resp)}")
             try:
-                data = resp.json()
+                data = _or_json(resp)
             except Exception:
-                preview = resp.text[:300].replace("\n", " ")
-                raise ValueError(f"OpenRouter вернул не-JSON (ct={resp.headers.get('content-type','?')}): {preview}")
+                # padding + обрезанный/пустой JSON — транзиент, ретраим
+                last_err = "оборванный/пустой ответ (keep-alive без валидного JSON)"
+                if attempt < MAX_ATTEMPTS - 1:
+                    continue
+                preview = resp.text[:300].replace("\n", " ").strip() or "<пусто>"
+                raise ValueError(
+                    f"OpenRouter вернул не-JSON после {MAX_ATTEMPTS} попыток "
+                    f"(ct={resp.headers.get('content-type','?')}): {preview}")
             finish = data.get("choices", [{}])[0].get("finish_reason")
-            if finish == "length" and attempt == 0:
+            if finish == "length" and budget == max_tokens:
                 budget = max_tokens * 4
                 continue
             break
+        else:
+            raise ValueError(f"OpenRouter недоступен ({last_err or 'нет ответа'})")
         return data
 
     async def _call_plain(messages: list[dict], max_tokens: int) -> str:
@@ -1074,7 +1126,10 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
         if not resp.is_success:
             # Step 0 failure is non-fatal: fallback to all books
             return ""
-        data = resp.json()
+        try:
+            data = _or_json(resp)
+        except Exception:
+            return ""
         return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
     # ── Step 0: book detection ────────────────────────────────────────────────

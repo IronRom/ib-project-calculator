@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey, Integer,
+    BigInteger, Boolean, Column, DateTime, ForeignKey, Integer,
     Numeric, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -113,10 +113,17 @@ class User(Base):
     # Блокировка администратором: False → вход запрещён
     is_active = Column(Boolean, nullable=False, default=True)
     company = Column(String(255), nullable=True)
+    # Привязка Telegram-бота: chat/user id и @username. NULL = не привязан.
+    telegram_id = Column(BigInteger, unique=True, nullable=True, index=True)
+    telegram_username = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     projects = relationship("Project", back_populates="user")
     audit_logs = relationship("AuditLog", back_populates="user")
+
+    @property
+    def telegram_linked(self) -> bool:
+        return self.telegram_id is not None
 
 
 class Project(Base):

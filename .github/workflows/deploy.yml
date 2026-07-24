@@ -47,8 +47,26 @@ jobs:
             ghcr.io/ironrom/ib-pir-frontend:latest
             ghcr.io/ironrom/ib-pir-frontend:${{ github.sha }}
 
+  build-bot:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./bot
+          push: true
+          tags: |
+            ghcr.io/ironrom/ib-pir-bot:latest
+            ghcr.io/ironrom/ib-pir-bot:${{ github.sha }}
+
   deploy:
-    needs: [build-backend, build-frontend]
+    needs: [build-backend, build-frontend, build-bot]
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH

@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     # OpenRouter-модель для vision-OCR сканов (document_parser._parse_pdf_vision)
     ocr_model: str = "anthropic/claude-sonnet-4.6"
     max_tz_chars: int = 50_000
+    # ── Telegram-бот ──────────────────────────────────────────────────────
+    # Общий секрет между ботом и backend для привилегированных вызовов
+    # (/auth/telegram/link, /auth/telegram/resolve). Бот шлёт его в заголовке
+    # X-Bot-Secret; со стороны интернета эти ручки без секрета недоступны.
+    bot_api_secret: str = ""
+    # @username бота — нужен для deep-link из кабинета (t.me/<username>?start=)
+    telegram_bot_username: str = ""
 
     class Config:
         env_file = ".env"

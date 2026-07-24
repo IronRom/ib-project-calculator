@@ -6,6 +6,7 @@ import { listProjects, deleteProject, Project } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
+import { TelegramConnect } from '@/components/TelegramConnect'
 
 const STATUS_MAP: Record<string, { label: string; tone: 'success' | 'warning' | 'info' | 'default' }> = {
   draft:      { label: 'Черновик',  tone: 'default' },
@@ -43,6 +44,9 @@ export default function ProjectsPage() {
         }
       />
       <div style={{ padding: '24px 28px' }}>
+        <div style={{ marginBottom: 20 }}>
+          <TelegramConnect />
+        </div>
         {loading ? (
           <div style={{ color: 'var(--fg-3)', fontSize: 13 }}>Загрузка…</div>
         ) : projects.length === 0 ? (

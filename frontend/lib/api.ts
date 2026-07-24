@@ -420,6 +420,8 @@ export interface User {
   can_calculate: boolean
   is_active?: boolean
   company?: string
+  telegram_linked?: boolean
+  telegram_username?: string | null
   created_at: string
 }
 
@@ -657,4 +659,14 @@ export function putAdminSettings(body: Record<string, string>) {
 
 export function createUser(body: { email: string; password: string; company?: string; role?: string; can_calculate?: boolean }) {
   return request<User>(`/admin/users`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+}
+
+// ── Telegram ────────────────────────────────────────────────────────────────
+
+export function getTelegramLinkCode() {
+  return request<{ code: string; deep_link: string; bot_username: string }>(`/auth/telegram/link-code`)
+}
+
+export function unlinkTelegram() {
+  return request<{ linked: boolean }>(`/auth/telegram/unlink`, { method: 'POST' })
 }

@@ -30,6 +30,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      BOT_API_SECRET: ${BOT_API_SECRET}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-ib_pir_bot}
     depends_on:
       db:
         condition: service_healthy
@@ -37,6 +39,18 @@ services:
       - "127.0.0.1:8010:8000"
     volumes:
       - uploads:/app/uploads
+
+  bot:
+    image: ghcr.io/ironrom/ib-pir-bot:latest
+    restart: unless-stopped
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      BACKEND_URL: http://backend:8000
+      BOT_API_SECRET: ${BOT_API_SECRET}
+      # Тот же гео-обход OpenRouter не нужен боту — он ходит только в backend
+      NO_PROXY: backend,db,localhost,127.0.0.1
+    depends_on:
+      - backend
 
   frontend:
     image: ghcr.io/ironrom/ib-pir-frontend:latest

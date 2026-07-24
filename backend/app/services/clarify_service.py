@@ -110,7 +110,24 @@ async def clarify_entities(
         )
     if not resp.is_success:
         raise ValueError(f"OpenRouter {resp.status_code}: {resp.text[:200]}")
-    data = resp.json()
+    # OpenRouter при долгой генерации шлёт SSE keep-alive (': OPENROUTER
+    # PROCESSING') в теле — resp.json() падает. Срезаем comment-строки.
+    try:
+        data = resp.json()
+    except Exception:
+        raw = resp.text or ""
+        cleaned = "\n".join(
+            ln for ln in raw.splitlines()
+            if ln.strip() and not ln.lstrip().startswith(":")
+        ).strip()
+        if cleaned.startswith("data:"):
+            chunks = [ln[5:].strip() for ln in cleaned.splitlines()
+                      if ln.strip().startswith("data:") and ln[5:].strip() not in ("", "[DONE]")]
+            cleaned = chunks[-1] if chunks else cleaned
+        start = cleaned.find("{")
+        if start < 0:
+            raise ValueError("OpenRouter вернул пустой ответ — повторите уточнение")
+        data = json.loads(cleaned[start:])
     tcs = data.get("choices", [{}])[0].get("message", {}).get("tool_calls") or []
     if not tcs:
         raise ValueError("Модель не вернула patch_entities — переформулируйте уточнение")

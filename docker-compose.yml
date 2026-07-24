@@ -29,6 +29,8 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@localhost}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin12345!}
       UPLOADS_DIR: /app/uploads
+      BOT_API_SECRET: ${BOT_API_SECRET:-}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-ib_pir_bot}
     volumes:
       - ./backend:/app
       - uploads_data:/app/uploads
@@ -38,6 +40,18 @@ services:
       db:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      BACKEND_URL: http://backend:8000
+      BOT_API_SECRET: ${BOT_API_SECRET:-}
+    depends_on:
+      - backend
+    command: python main.py
 
   frontend:
     build:

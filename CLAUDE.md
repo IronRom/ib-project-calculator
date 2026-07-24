@@ -5,7 +5,26 @@
 > При изменении архитектуры — вносить правки в эту секцию.
 
 **Стек**: Next.js 14 (App Router) + FastAPI + PostgreSQL + Claude API (claude-sonnet-4-6)
++ Telegram-бот (aiogram 3, сервис `bot/`, long polling)
 **Дизайн**: `design/DESIGN_SYSTEM.md`
+
+### Telegram-бот (`bot/`)
+
+Отдельный сервис aiogram 3 (long polling), НЕ хранит бизнес-логику: резолвит
+`telegram_id → JWT` пользователя привилегированной ручкой и дёргает те же ручки
+API, что и веб. Привязка: кабинет выдаёт одноразовый подписанный код
+(JWT purpose=tg_link, 15 мин) → deep-link `t.me/ib_pir_bot?start=<code>` →
+`/start` в боте → `POST /auth/telegram/link` (общий секрет `X-Bot-Secret`).
+Дальше `POST /auth/telegram/resolve` (тот же секрет) отдаёт боту JWT пользователя.
+- `users.telegram_id` (BigInteger unique) + `telegram_username`, миграция a3b4c5d6e7f8
+- `app/api/telegram.py`: link-code / unlink (кабинет), link / resolve (секрет бота)
+- Меню бота = проекты → файлы (add/del) / расчёты → «Новый расчёт»: комментарий
+  (единственный рычаг пользователя = уточнение) → фон-пайплайн extract → poll →
+  clarify(comment) → **авто-finalize** → отдать 2ПС + КП(docx/pdf) документами
+- Env: `TELEGRAM_BOT_TOKEN`, `BOT_API_SECRET`, `TELEGRAM_BOT_USERNAME` (backend),
+  `BACKEND_URL` (бот). Фронт: карточка `TelegramConnect` на странице проектов
+- ВАЖНО: один поллер на токен — нельзя одновременно локальный и прод-бот
+  (Telegram 409 Conflict). Прод-бот в docker-compose.prod.yml (образ ib-pir-bot)
 
 ### Поток данных
 
@@ -621,3 +640,25 @@ ws-черновиков старых СБЦП. Точные коды из эта
   DNS-кэш может держать старый IP — проверять с --resolve
 - Старый сервер вычищен: контейнеры+volumes (down -v), nginx-конфиг,
   сертификат, /opt/pir, deploy-pir, образы. Чужие сайты живы (hollygar 200)
+
+### 2026-07-24 (восемнадцатая сессия — Telegram-бот + фикс OpenRouter keep-alive)
+- НОВЫЙ СЕРВИС `bot/` (aiogram 3, long polling) — см. секцию «Telegram-бот»
+  в Архитектуре. Меню=проекты→файлы/расчёты→«Новый расчёт» с комментарием→
+  авто-finalize→файлы 2ПС+КП. Привязка через подписанный код из кабинета.
+  Backend: `app/api/telegram.py` (link-code/unlink/link/resolve), миграция
+  a3b4c5d6e7f8 (users.telegram_id BigInt unique + telegram_username),
+  UserOut.telegram_linked. Фронт: `components/TelegramConnect.tsx` на /projects
+- ФИКС «OpenRouter вернул не-JSON (ct=application/json)»: OpenRouter при долгой
+  генерации набивает тело keep-alive-паддингом (строки пробелов и/или
+  ': OPENROUTER PROCESSING') ПЕРЕД валидным JSON — обычно resp.json() это терпит
+  (ведущие пробелы легальны), но при обрыве генерации тело = padding + обрезанный
+  JSON → парсинг падает. Решение: `_or_json()` (срез comment/SSE-строк) +
+  ретраи в `_call` (3 попытки: транзиентные 429/5xx/сеть/битый JSON, +бюджет×4
+  на finish=length). Аналогично в clarify_service. Проверено: extract на
+  Котельной (проект 15) прошёл все проходы → done, 6 позиций, без ошибки
+- Локально: миграция накатана, backend/бот пересозданы, бот @ib_pir_bot polling;
+  link/resolve/me e2e зелёные (wrong secret → 403). Смоук extract зелёный
+- Деплой прод: CI собирает +ghcr ib-pir-bot; /opt/pir/.env ДОЛЖЕН получить
+  TELEGRAM_BOT_TOKEN / BOT_API_SECRET / TELEGRAM_BOT_USERNAME (иначе бот и
+  ручки resolve/link мертвы). ОДИН поллер на токен — локальный бот погасить
+  перед прод-деплоем (Telegram 409 Conflict)

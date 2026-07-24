@@ -31,6 +31,8 @@ class UserOut(BaseModel):
     can_calculate: bool
     is_active: bool = True
     company: Optional[str]
+    telegram_linked: bool = False
+    telegram_username: Optional[str] = None
     created_at: datetime
 
     class Config:
