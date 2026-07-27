@@ -116,6 +116,10 @@ class User(Base):
     # Привязка Telegram-бота: chat/user id и @username. NULL = не привязан.
     telegram_id = Column(BigInteger, unique=True, nullable=True, index=True)
     telegram_username = Column(String(64), nullable=True)
+    # Одноразовый короткий код привязки (deep-link Telegram: [A-Za-z0-9_-], ≤64).
+    # Полный JWT в start= не помещается — храним opaque-код с TTL.
+    tg_link_code = Column(String(64), nullable=True, index=True)
+    tg_link_code_expires = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     projects = relationship("Project", back_populates="user")
