@@ -871,6 +871,9 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     positions = []
     errors = []
     warnings: list[str] = []
+    # Автосборка изысканий: {book_id: {book_code, names[]}} — survey-позиции,
+    # распознанные в ТЗ, но требующие ручного ввода объёмов
+    _auto_surveys: dict[int, dict] = {}
 
     if stage in ("П", "Р"):
         only, other = (("ПД", "рабочая"), ("РД", "проектная"))[stage == "Р"]
@@ -896,13 +899,13 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             continue
 
         # ── Survey books (изыскания) are priced by igi_calculator, not here ──
-        # Their rows are in RUBLES (not тыс.руб) — pricing them through the
-        # standard (a+b×X)×1000 path would inflate cost ×1000.
+        # Их строки в РУБЛЯХ (не тыс.руб). Автосборка: собираем survey-позиции
+        # в блок «Изыскания» (по книге), не роняем в errors. Точный расчёт
+        # требует объёмов (пункты/площади/бурение), которых в ТЗ обычно нет —
+        # предупреждаем и предлагаем ручной ввод.
         if getattr(book, 'calc_method', 'standard') == 'survey':
-            errors.append(
-                f"{object_name}: «{book.code}» — справочник изысканий; позиция считается "
-                f"в блоке «Изыскания» (ИГИ/ИГДИ/ИГФИ), не в основном расчёте ПИР"
-            )
+            blk = _auto_surveys.setdefault(book.id, {"book_code": book.code, "names": []})
+            blk["names"].append(object_name)
             continue
 
         # ── ASUTP factor-based path (no table_num needed) ────────────────────
@@ -1172,6 +1175,21 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
 
     # ── ИГИ geological surveys ────────────────────────────────────────────────
     geological_surveys = entities_dict.get("geological_surveys", [])
+    # Автосборка: изыскания, распознанные в позициях ТЗ, но без ручного блока —
+    # выносим как раздел «Изыскания» с предупреждением о необходимости объёмов
+    if _auto_surveys:
+        from app.services.igi_calculator import _survey_label
+        _manual_books = {s.get("book_id") for s in geological_surveys}
+        for _bid, _blk in _auto_surveys.items():
+            if _bid in _manual_books:
+                continue  # пользователь уже завёл блок вручную
+            _label = _survey_label(_blk["book_code"])
+            _names = ", ".join(_blk["names"][:4]) + ("…" if len(_blk["names"]) > 4 else "")
+            warnings.append(
+                f"Изыскания «{_label}» распознаны в ТЗ ({_names}) — раздел НЕ рассчитан "
+                f"автоматически: объёмы (пункты/площади/бурение) в ТЗ не заданы. "
+                f"Задайте их вручную в блоке «Изыскания» (справочник {_blk['book_code']})."
+            )
     if geological_surveys:
         from app.services.igi_calculator import calculate_igi
         igi_positions, igi_errors = calculate_igi(geological_surveys, db)
