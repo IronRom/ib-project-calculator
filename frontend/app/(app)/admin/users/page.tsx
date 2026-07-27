@@ -15,6 +15,8 @@ export default function AdminUsersPage() {
   const [form, setForm] = useState({ email: '', password: '', company: '', role: 'user', can_calculate: true })
   const [formError, setFormError] = useState('')
   const [creating, setCreating] = useState(false)
+  const [editTg, setEditTg] = useState<{ id: number; value: string } | null>(null)
+  const [tgBusy, setTgBusy] = useState(false)
 
   useEffect(() => {
     Promise.all([listUsers(), getMe()])
@@ -32,6 +34,22 @@ export default function AdminUsersPage() {
     if (blocking && !confirm(`Заблокировать ${user.email}? Вход будет запрещён.`)) return
     const updated = await updateUser(user.id, { is_active: !blocking ? true : false })
     setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)))
+  }
+
+  async function saveTg(user: User) {
+    if (!editTg) return
+    const raw = editTg.value.trim()
+    if (raw && !/^\d+$/.test(raw)) { alert('Telegram ID — только цифры'); return }
+    setTgBusy(true)
+    try {
+      const updated = await updateUser(user.id, { telegram_id: raw ? Number(raw) : null })
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)))
+      setEditTg(null)
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Ошибка привязки Telegram')
+    } finally {
+      setTgBusy(false)
+    }
   }
 
   async function handleDelete(user: User) {
@@ -116,7 +134,7 @@ export default function AdminUsersPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead style={{ background: 'var(--bg-raised)' }}>
                 <tr>
-                  {['Email', 'Организация', 'Роль', 'Статус', 'Расчёты', 'Создан', ''].map((h, i) => (
+                  {['Email', 'Организация', 'Роль', 'Статус', 'Расчёты', 'Telegram', 'Создан', ''].map((h, i) => (
                     <th key={i} style={{ textAlign: 'left', padding: '10px 14px', fontSize: 11, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border-default)' }}>
                       {h}
                     </th>
@@ -163,6 +181,36 @@ export default function AdminUsersPage() {
                             transition: 'left var(--duration-2)',
                           }} />
                         </button>
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        {editTg?.id === user.id ? (
+                          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                            <input
+                              autoFocus inputMode="numeric" placeholder="telegram id"
+                              value={editTg.value}
+                              onChange={(e) => setEditTg({ id: user.id, value: e.target.value })}
+                              onKeyDown={(e) => { if (e.key === 'Enter') saveTg(user); if (e.key === 'Escape') setEditTg(null) }}
+                              style={{ width: 120, background: 'var(--bg-input)', border: 'var(--hairline)',
+                                       borderRadius: 'var(--radius-md)', padding: '6px 8px', fontSize: 12,
+                                       fontFamily: 'var(--font-mono)', color: 'var(--fg-1)' }}
+                            />
+                            <Button variant="primary" size="sm" disabled={tgBusy} onClick={() => saveTg(user)}>
+                              {tgBusy ? '…' : 'OK'}
+                            </Button>
+                            <button onClick={() => setEditTg(null)} title="Отмена"
+                              style={{ background: 'none', border: 'none', color: 'var(--fg-3)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
+                          </span>
+                        ) : user.telegram_id ? (
+                          <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                            <Chip tone="success">TG {user.telegram_id}</Chip>
+                            <button onClick={() => setEditTg({ id: user.id, value: String(user.telegram_id) })}
+                              style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12 }}>изменить</button>
+                          </span>
+                        ) : (
+                          <Button variant="secondary" size="sm" onClick={() => setEditTg({ id: user.id, value: '' })}>
+                            Привязать
+                          </Button>
+                        )}
                       </td>
                       <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-3)' }}>
                         {new Date(user.created_at).toLocaleDateString('ru-RU')}

@@ -71,6 +71,22 @@ def update_user(
             raise HTTPException(status_code=422, detail="Нельзя заблокировать самого себя")
         user.is_active = body.is_active
         changes["is_active"] = body.is_active
+    # Привязка Telegram по id (передано поле — даже null → отвязать)
+    if "telegram_id" in body.model_fields_set:
+        if body.telegram_id is None:
+            user.telegram_id = None
+            user.telegram_username = None
+            changes["telegram_id"] = None
+        else:
+            # снять этот telegram_id с прежнего владельца, если был
+            prev = db.query(User).filter(
+                User.telegram_id == body.telegram_id, User.id != user.id
+            ).first()
+            if prev:
+                prev.telegram_id = None
+                prev.telegram_username = None
+            user.telegram_id = body.telegram_id
+            changes["telegram_id"] = body.telegram_id
 
     db.add(AuditLog(
         user_id=current_user.id, action="update_user",

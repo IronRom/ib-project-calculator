@@ -32,6 +32,7 @@ class UserOut(BaseModel):
     is_active: bool = True
     company: Optional[str]
     telegram_linked: bool = False
+    telegram_id: Optional[int] = None
     telegram_username: Optional[str] = None
     created_at: datetime
 
@@ -149,6 +150,9 @@ class UserUpdateAdmin(BaseModel):
     can_calculate: Optional[bool] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    # Прямая привязка Telegram админом (в обход deep-link из кабинета).
+    # None + поле передано → отвязать; None + поле НЕ передано → не трогать.
+    telegram_id: Optional[int] = None
 
 
 class ReferenceBookOut(BaseModel):

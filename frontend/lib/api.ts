@@ -133,7 +133,7 @@ export function listUsers() {
   return request<User[]>('/admin/users')
 }
 
-export function updateUser(userId: number, data: { can_calculate?: boolean; role?: string; is_active?: boolean }) {
+export function updateUser(userId: number, data: { can_calculate?: boolean; role?: string; is_active?: boolean; telegram_id?: number | null }) {
   return request<User>(`/admin/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
 
@@ -421,6 +421,7 @@ export interface User {
   is_active?: boolean
   company?: string
   telegram_linked?: boolean
+  telegram_id?: number | null
   telegram_username?: string | null
   created_at: string
 }
