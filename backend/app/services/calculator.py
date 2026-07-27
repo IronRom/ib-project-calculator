@@ -915,6 +915,15 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
                 errors.append(f"{object_name}: {exc}")
             continue
 
+        # Гард: справочник активен, но НЕ оцифрован (0 строк) → внятная ошибка,
+        # а не вводящее в заблуждение «строка для X не найдена».
+        if db.query(ReferenceRow).filter(ReferenceRow.book_version_id == book.id).count() == 0:
+            errors.append(
+                f"{object_name}: справочник «{book.code}» есть в системе, но не оцифрован "
+                f"(0 строк в базе) — позиция не может быть рассчитана. Оцифруйте книгу в админке."
+            )
+            continue
+
         if not table_num:
             errors.append(f"{object_name}: не определена таблица СБЦП")
             continue

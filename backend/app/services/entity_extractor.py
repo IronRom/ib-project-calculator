@@ -380,6 +380,30 @@ SYSTEM_PROMPT = """Ты опытный сметчик ПИР (проектно-�
   несколько позиций — по одной на каждый пункт справочника.
   Извлеки ВСЕ, даже если X неизвестен (x_value=null).
 
+ПОЛНОТА — ГЛАВНОЕ ТРЕБОВАНИЕ (не пропусти ни одной позиции):
+  Типовое ТЗ на инженерно-техническое обеспечение / реконструкцию объекта порождает
+  МНОГО позиций (обычно 8–30). Прежде чем закончить, пройди по чек-листу и извлеки
+  КАЖДУЮ применимую позицию ОТДЕЛЬНОЙ строкой:
+    • ИЗЫСКАНИЯ (если в ТЗ есть слова «изыскания», «изыскательские», «предоставляется
+      исполнителем») — каждый вид ОТДЕЛЬНОЙ позицией (category=new_construction):
+        инженерно-геодезические, инженерно-геологические,
+        инженерно-гидрометеорологические, инженерно-экологические.
+    • ОБСЛЕДОВАНИЯ / ОБМЕРЫ существующих зданий и систем (при реконструкции/капремонте).
+    • ЗДАНИЯ и сооружения — по каждому своя позиция (X = площадь/объём).
+    • ИНЖЕНЕРНЫЕ СИСТЕМЫ здания, КАЖДАЯ отдельно:
+        отопление; вентиляция/кондиционирование; горячее водоснабжение; холодное
+        водоснабжение; канализация; электроснабжение/электроосвещение; слаботочные
+        системы и ИТСО (видеонаблюдение СОТВ/СОТН, охранная и тревожная сигнализация
+        СОТС, СКУД, связь, оповещение, серверы/АРМ ИТСО); автоматизация/диспетчеризация/АСУ.
+    • НАРУЖНЫЕ СЕТИ (тепло-, водоснабжение, канализация, кабельные линии) — каждая своя.
+  Не объединяй разные системы в одну позицию. Не обрывай перечисление на первой крупной
+  позиции. Пропущенная позиция — грубая ошибка сметы.
+
+КРАТКОСТЬ НА ЭТОМ ШАГЕ:
+  Держи notes и tz_quote КОРОТКИМИ (одна строка). Приоритет здесь — ПОЛНОТА охвата,
+  а не подробность обоснования. Факторы АСУТП указывай кратко (кодами п.X.Y без длинных
+  рассуждений). Не трать бюджет ответа на разбор одной позиции в ущерб остальным.
+
 ТОЛЬКО ТО, ЧТО ОПИСАНО В ТЗ:
   Не добавляй объекты только из-за названия проекта или объекта.
   Объект должен быть явно упомянут в тексте ТЗ (в этапах, требованиях, перечне работ, ТЭП).
@@ -448,6 +472,10 @@ SYSTEM_PROMPT = """Ты опытный сметчик ПИР (проектно-�
   Если не найдено — пустая строка.
 
 ═══ АСУТП (СБЦП 81-2001-22) — ОСОБЫЙ ТИП ═══
+
+АСУТП — это ОДНА позиция наравне с прочими системами. Не описывай её в ущерб полноте
+остальных и не растворяй в ней другие системы (отопление, вентиляцию, ИТСО и т.п. —
+это отдельные позиции). Обоснование факторов держи кратким.
 
 Для позиций АСУТП/ПЛК/АРМ/SCADA указывай:
   sbts_code = "СБЦП 81-2001-22"
@@ -1195,7 +1223,7 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
     msg1_content += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
 
     messages: list[dict] = [{"role": "user", "content": msg1_content}]
-    data1 = await _call(messages, [EXTRACTION_TOOL_OPENAI], "extract_pir_entities", 4096)
+    data1 = await _call(messages, [EXTRACTION_TOOL_OPENAI], "extract_pir_entities", 8192)
 
     tool_calls = data1.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
     if not tool_calls:
@@ -1223,6 +1251,48 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
         )
     _fill_sbts_table_from_type_id(result, db)
     _fill_sbts_codes(result, db, detected_codes)
+
+    # ── Pass 1b: добор пропущенных позиций (completeness sweep) ────────────────
+    # Модель часто «залипает» на одной крупной позиции и не перечисляет остальное.
+    # Продолжаем ТОТ ЖЕ диалог (ТЗ уже в кэше) и просим ТОЛЬКО пропущенное.
+    if result.entities and db is not None:
+        try:
+            have = "; ".join(
+                f"{e.object_name}" for e in result.entities if e.object_name
+            )[:2500]
+            sweep_user = (
+                "Проверь ПОЛНОТУ по чек-листу (изыскания — все виды; обследования/обмеры; "
+                "каждое здание; КАЖДАЯ инженерная система здания отдельно: отопление, "
+                "вентиляция, ГВС, ХВС, канализация, электро, слаботочка/ИТСО, связь, АСУ; "
+                "наружные сети). Уже извлечены позиции:\n" + have + "\n\n"
+                "Вызови extract_pir_entities ЕЩЁ РАЗ и верни в entities ТОЛЬКО позиции, "
+                "которых НЕТ в списке выше (пропущенные из ТЗ). Не повторяй уже извлечённые. "
+                "Если ничего не пропущено — верни пустой entities."
+            )
+            assistant_msg1 = data1["choices"][0]["message"]
+            sweep_messages = [
+                {"role": "user", "content": msg1_content},
+                {"role": "assistant", "content": assistant_msg1.get("content") or "",
+                 "tool_calls": assistant_msg1.get("tool_calls", [])},
+                {"role": "tool", "tool_call_id": tool_calls[0]["id"],
+                 "content": tool_calls[0]["function"]["arguments"]},
+                {"role": "user", "content": sweep_user},
+            ]
+            data1b = await _call(sweep_messages, [EXTRACTION_TOOL_OPENAI],
+                                 "extract_pir_entities", 8192)
+            tc1b = data1b.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
+            if tc1b:
+                extra = ExtractionResult(**json.loads(tc1b[0]["function"]["arguments"]))
+                seen = {(e.object_name or "").strip().lower() for e in result.entities}
+                added = [e for e in extra.entities
+                         if (e.object_name or "").strip().lower() not in seen and e.object_name]
+                if added:
+                    result.entities.extend(added)
+                    _fill_sbts_table_from_type_id(result, db)
+                    _fill_sbts_codes(result, db, detected_codes)
+                    _progress(f"Добор полноты: +{len(added)} позиций")
+        except Exception:
+            pass  # добор не критичен — исходные позиции уже есть
 
     if not result.entities or db is None:
         _flag_missing_x_values(result)
