@@ -457,3 +457,44 @@ def test_kotelnaya_nz849_nz52(db):
     assert math.isclose(by["ЦПУ"], 466_810.30, abs_tol=0.5), by["ЦПУ"]
     assert math.isclose(by["Котельная установка"], 1_740_525.90, abs_tol=0.5), \
         by["Котельная установка"]
+
+
+def _book_type_by_a(db, code, table_num, a_value):
+    """Найти (book, object_type) по коду книги, номеру таблицы и значению «а»."""
+    from app.models import BookObjectType, ReferenceBook, ReferenceRow
+    b = db.query(ReferenceBook).filter(ReferenceBook.code == code).first()
+    assert b, f"книга {code} не найдена"
+    row = (db.query(ReferenceRow)
+           .filter(ReferenceRow.book_version_id == b.id,
+                   ReferenceRow.table_num == table_num,
+                   ReferenceRow.a == a_value).first())
+    assert row, f"{code} т.{table_num}: строка с a={a_value} не найдена"
+    return b, db.query(BookObjectType).filter(BookObjectType.id == row.object_type_id).first()
+
+
+def test_reisovaya_sotv_nz828(db):
+    """[Рейсовая] СОТВ 12 видеокамер, НЗ-828-ИТСО т.3.3 п.1 (a=105,2 в=5,313),
+    база 2021 ×1,68, П/Р 40/60: (105200+5313×12)×1,68 → ПД 113 538,43 / РД 170 307,65 руб."""
+    b, ot = _book_type_by_a(db, "НЗ-2021-МС828-ИТСО", 33, 105.2)
+    r = calculate({"stage": "П+Р", "entities": [
+        _ent(object_name="СОТВ", category="reconstruction",
+             sbts_code="НЗ-2021-МС828-ИТСО", sbts_table=33,
+             sbts_object_type_id=ot.id, x_value=12, x_unit="шт.")]}, db)
+    assert not r["errors"], r["errors"]
+    assert math.isclose(_one(r, "ПД")["cost"], 113_538.43, abs_tol=1.0)
+    assert math.isclose(_one(r, "РД")["cost"], 170_307.65, abs_tol=1.0)
+
+
+def test_reisovaya_building_nz848(db):
+    """[Рейсовая] АХ-блок 5182 м² реконструкция, НЗ-848-ОЖГС т.3.5 п.3.2
+    (a=1342,6 в=1,405), реконструкция ×1,5, база 2021 ×1,68, П/Р 40/60:
+    (1342600+1405×5182)×1,5×1,68 → ПД 8 692 296,48 / РД 13 038 444,72 руб."""
+    b, ot = _book_type_by_a(db, "НЗ-2021-МС848-ОЖГС", 305, 1342.6)
+    r = calculate({"stage": "П+Р", "entities": [
+        _ent(object_name="АХ-блок", category="reconstruction",
+             sbts_code="НЗ-2021-МС848-ОЖГС", sbts_table=305,
+             sbts_object_type_id=ot.id, x_value=5182, x_unit="кв.м",
+             coefficients=[{"name": "reconstruction", "value": 1.0}])]}, db)
+    assert not r["errors"], r["errors"]
+    assert math.isclose(_one(r, "ПД")["cost"], 8_692_296.48, rel_tol=1e-4)
+    assert math.isclose(_one(r, "РД")["cost"], 13_038_444.72, rel_tol=1e-4)
