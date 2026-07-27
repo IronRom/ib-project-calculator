@@ -110,7 +110,7 @@ def main(path: str):
         db.add(BookCondition(
             book_version_id=book.id,
             table_num=(int(c["table"]) if c.get("table") not in (None, "", "null") else None),
-            coeff_key=c["key"],
+            coeff_key=c["key"][:30],  # столбец VARCHAR(30)
             coeff_min=coeff, coeff_max=coeff,
             condition_short=c.get("short", ""),
             effect_type="multiplier_range" if coeff is not None else "flag",
