@@ -1110,7 +1110,9 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
                 "model": model_id,
                 "max_tokens": budget,
                 "temperature": 0,
-                "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+                "messages": [{"role": "system", "content": [
+                    {"type": "text", "text": SYSTEM_PROMPT,
+                     "cache_control": {"type": "ephemeral"}}]}] + messages,
                 "tools": tools,
                 # No tool_choice — let the model decide; avoids 404 on providers
                 # that don't support forced function calling.
@@ -1221,15 +1223,22 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
     _progress("Извлечение позиций из ТЗ…")
     types_ctx = _build_types_context(db, detected_codes) if db is not None else ""
     hints_ctx = _build_hints_context(db, detected_codes) if db is not None else ""
-    msg1_content = (
+    msg1_text = (
         "Проанализируй ТЗ и извлеки все объекты. "
         "Вызови функцию extract_pir_entities.\n\n"
     )
     if types_ctx:
-        msg1_content += types_ctx + "\n\n"
+        msg1_text += types_ctx + "\n\n"
     if hints_ctx:
-        msg1_content += hints_ctx + "\n\n"
-    msg1_content += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
+        msg1_text += hints_ctx + "\n\n"
+    msg1_text += "═══ ТЕХНИЧЕСКОЕ ЗАДАНИЕ ═══\n\n" + tz_text
+
+    # Кэшируем весь пользовательский блок (ТЗ большое, БЕЗ кэша уходит по полной
+    # цене в Pass 1, 1b и 2). cache_control ставит точку кэша: Pass 1 пишет кэш,
+    # Pass 1b/Pass 2 читают ТЗ из него (~0.1× вместо 1×). msg1_content — один и
+    # тот же объект во всех проходах, поэтому префикс байт-в-байт совпадает.
+    msg1_content = [{"type": "text", "text": msg1_text,
+                     "cache_control": {"type": "ephemeral"}}]
 
     messages: list[dict] = [{"role": "user", "content": msg1_content}]
     data1 = await _call(messages, [EXTRACTION_TOOL_OPENAI], "extract_pir_entities", 8192)
@@ -1264,7 +1273,10 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
     # ── Pass 1b: добор пропущенных позиций (completeness sweep) ────────────────
     # Модель часто «залипает» на одной крупной позиции и не перечисляет остальное.
     # Продолжаем ТОТ ЖЕ диалог (ТЗ уже в кэше) и просим ТОЛЬКО пропущенное.
-    if result.entities and db is not None:
+    # Гейт: не гоняем добор, если позиций уже много (полнота вероятна) — экономим
+    # выходные токены сweep-прохода.
+    _sweep_cap = 20
+    if result.entities and db is not None and len(result.entities) < _sweep_cap:
         try:
             have = "; ".join(
                 f"{e.object_name}" for e in result.entities if e.object_name
