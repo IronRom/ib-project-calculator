@@ -23,10 +23,54 @@ _STRIP_RANGE_SUFFIX = re.compile(
 
 # ── Context builders ──────────────────────────────────────────────────────────
 
-def _build_book_list(db) -> str:
-    """Step 0: books with representative object sample (one per table) for semantic matching."""
+def _detect_funding(tz_text: str) -> str:
+    """Источник финансирования объекта (на всё ТЗ) — определяет нормативную базу.
+
+    federal | private → только СБЦ/НЗ (МРР не применять).
+    moscow_city       → региональные МРР (для видов работ, где есть).
+    По умолчанию считаем НЕ московским горзаказом (federal) — так безопаснее:
+    МРР подключаем только при ЯВНОМ признаке городского заказа Москвы.
+    """
+    t = (tz_text or "").lower()
+    # Явный московский городской заказ
+    moscow = any(k in t for k in (
+        "бюджета города москвы", "бюджет города москвы", "за счёт средств бюджета города",
+        "департамент города москвы", "департамента города москвы",
+        "правительства москвы", "правительство москвы",
+        "адресная инвестиционная программа города москвы", "аип города москвы",
+        "городской заказ", "городского заказа", "мосгорзаказ",
+        "гку города москвы", "гбу города москвы", "казённое учреждение города москвы",
+        "казенное учреждение города москвы", "департамент строительства города москвы",
+    ))
+    # Явный федеральный признак
+    federal = any(k in t for k in (
+        "федеральн", "фгбу", "фку ", "фгуп", "фгаоу", "фгбоу",
+        "министерств", "росавтодор", "федеральная целевая программа",
+        "средств федерального бюджета", "государственная корпорация",
+    ))
+    private = any(k in t for k in (
+        "инвестор", "застройщик", "собственных средств", "частн",
+    ))
+    if moscow and not federal:
+        return "moscow_city"
+    if federal:
+        return "federal"
+    if private:
+        return "private"
+    return "federal"  # безопасный дефолт: без МРР
+
+
+def _build_book_list(db, allow_regional: bool = True) -> str:
+    """Step 0: books with representative object sample (one per table) for semantic matching.
+
+    allow_regional=False (не московский горзаказ) → региональные [Регион] книги
+    (МРР) физически ИСКЛЮЧАЮТСЯ из списка — гарантия правильной базы, а не надежда
+    на соблюдение промпта моделью.
+    """
     from app.models import ReferenceBook, BookObjectType
     books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
+    if not allow_regional:
+        books = [b for b in books if not getattr(b, "region", None)]
     if not books:
         return ""
     lines = [
@@ -891,14 +935,17 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
     system_block = [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
 
     # ── Step 0: book detection ────────────────────────────────────────────────
+    _allow_regional = _detect_funding(tz_text) == "moscow_city"
     detected_codes: list[str] = []
 
     if db is not None:
         # Try regex first (free)
         detected_codes = _detect_books_from_text(tz_text)
+        if not _allow_regional:
+            detected_codes = [c for c in detected_codes if "МРР" not in c.upper()]
 
         if not detected_codes:
-            book_list = _build_book_list(db)
+            book_list = _build_book_list(db, _allow_regional)
             if book_list:
                 # ── Step 0a: extract object list + project context from TZ ──
                 step0a_msg = (
@@ -1201,11 +1248,19 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
 
     # ── Step 0: book detection ────────────────────────────────────────────────
     _progress("Определение применимых справочников…")
+    # Источник финансирования — на всё ТЗ (определяет базу). НЕ московский
+    # горзаказ → МРР исключаем детерминированно (не полагаемся на промпт).
+    funding = _detect_funding(tz_text)
+    allow_regional = funding == "moscow_city"
+    _progress(f"Источник финансирования: {funding} "
+              f"({'МРР разрешены' if allow_regional else 'только федеральные СБЦ/НЗ'})")
     detected_codes: list[str] = []
     if db is not None:
         detected_codes = _detect_books_from_text(tz_text)
+        if not allow_regional:
+            detected_codes = [c for c in detected_codes if "МРР" not in c.upper()]
         if not detected_codes:
-            book_list = _build_book_list(db)
+            book_list = _build_book_list(db, allow_regional)
             if book_list:
                 # ── Step 0a: extract object list + project context from TZ ──
                 step0a_content = (
