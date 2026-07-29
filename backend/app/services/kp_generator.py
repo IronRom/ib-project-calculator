@@ -161,37 +161,6 @@ def _add_run(para: Any, text: str, bold: bool = False, italic: bool = False,
     return run
 
 
-# Строки КП, к которым добавляется краткий перечень работ
-_SCOPED_LINES = {"Разработка проектной документации", "Разработка рабочей документации"}
-
-
-def _scope_lines(entities: Optional[list] = None) -> list[str]:
-    """Краткое пояснение «к чему» для строк ПД/РД — по образцу смет Александрова.
-
-    Этапы из ТЗ (section_num/section_name), если заданы; иначе полный
-    перечень объектов проектирования.
-    """
-    if not entities:
-        return []
-    ents = [e for e in entities if not e.get("deleted")]
-    stages: dict[int, str] = {}
-    for e in ents:
-        n = e.get("section_num") or 0
-        name = (e.get("section_name") or "").strip()
-        if n > 0 and name:
-            stages.setdefault(n, name)
-    if stages:
-        import re
-        return [name if re.match(r"(?i)^этап\s*\d", name) else f"Этап {n}: {name}"
-                for n, name in sorted(stages.items())]
-    names: list[str] = []
-    for e in ents:
-        nm = (e.get("object_name") or e.get("object_type") or "").strip()
-        if nm and nm not in names:
-            names.append(nm)
-    return names
-
-
 # Оговорки под таблицей КП — единые для Word и PDF версий
 _KP_NOTES = [
     "Данное коммерческое предложение действует в течении 15 (пятнадцати) рабочих дней.",
@@ -204,44 +173,20 @@ _KP_NOTES = [
 
 
 def _build_kp_lines(result: dict[str, Any]) -> list[tuple[str, float]]:
-    """Build КП table lines (name, cost_with_vat) from calculation positions.
+    """Строки таблицы КП (наименование, сумма с НДС) — результаты титульного
+    листа ПС «как есть», без дополнительных пояснений (по требованию сметчика).
 
-    Структура по образцу эталонных КП: блок изысканий одной строкой +
-    «Разработка ПД» / «Разработка РД». АСУ ТП — марка внутри ПД/РД, не
-    самостоятельный результат ПИР: позиция АСУТП (факторный метод, стадийность
-    встроена в цену) растворяется в строках ПД/РД по долям модулей
-    (_kp_pd_frac из калькулятора). Прочие stage-embedded позиции — изыскания.
+    Единый источник разбивки с 2ПС: `build_blocks` (каждое изыскание отдельной
+    строкой, обследования, «Разработка ПД», «Разработка РД»; АСУТП растворён
+    в ПД/РД по доле). Порядок и суммы совпадают с графой «Всего» листа ПС.
     """
-    positions = result.get("positions", [])
+    from app.services.export_2ps import build_blocks
+
     vat_rate = (result.get("vat_rate") or 22) / 100
-
-    survey_cost = pd_cost = rd_cost = other_cost = 0.0
-    for p in positions:
-        c = float(p.get("cost", 0))
-        if p.get("_stage_embedded"):
-            frac = p.get("_kp_pd_frac")
-            if frac is not None:
-                pd_cost += c * float(frac)
-                rd_cost += c * (1 - float(frac))
-            else:
-                survey_cost += c
-        elif p.get("stage_label") == "ПД":
-            pd_cost += c
-        elif p.get("stage_label") == "РД":
-            rd_cost += c
-        else:
-            other_cost += c
-
-    lines: list[tuple[str, float]] = []
-    if survey_cost:
-        lines.append(("Инженерные изыскания", survey_cost * (1 + vat_rate)))
-    if pd_cost:
-        lines.append(("Разработка проектной документации", pd_cost * (1 + vat_rate)))
-    if rd_cost:
-        lines.append(("Разработка рабочей документации", rd_cost * (1 + vat_rate)))
-    if other_cost:
-        lines.append(("Проектно-изыскательские работы", other_cost * (1 + vat_rate)))
-    return lines
+    return [
+        (b["name"], round(b["cost"] * (1 + vat_rate), 2))
+        for b in build_blocks(result)
+    ]
 
 
 # ── Word generator ────────────────────────────────────────────────────────────
@@ -354,8 +299,7 @@ def generate_kp_word(
         _set_cell_borders(cell)
         _set_cell_shading(cell, "D9D9D9")
 
-    # Data rows
-    scope = _scope_lines(entities)
+    # Data rows — результаты листа ПС без дополнительных пояснений
     for num, (name, cost) in enumerate(lines, 1):
         row = table.add_row()
         for ci, (cell, text) in enumerate(zip(row.cells, [str(num), name, _fmt(cost)])):
@@ -366,14 +310,6 @@ def generate_kp_word(
             r.font.size = Pt(11)
             r.font.name = "Times New Roman"
             _set_cell_borders(cell)
-            # краткий перечень работ под названием строки ПД/РД
-            if ci == 1 and name in _SCOPED_LINES and scope:
-                for s in scope:
-                    sp = cell.add_paragraph()
-                    sr = sp.add_run(f"– {s}")
-                    sr.italic = True
-                    sr.font.size = Pt(9)
-                    sr.font.name = "Times New Roman"
 
     # НДС row
     vat_row = table.add_row()
@@ -588,12 +524,8 @@ def generate_kp_pdf(
             Paragraph(f"Сумма, с НДС\n{vat_pct}%", th_style),
         ]
     ]
-    scope = _scope_lines(entities)
     for num, (name, cost) in enumerate(lines, 1):
         name_html = xml_escape(name)
-        if name in _SCOPED_LINES and scope:
-            details = "<br/>".join(f"– {xml_escape(s)}" for s in scope)
-            name_html += f'<br/><font size="9"><i>{details}</i></font>'
         table_data.append([
             Paragraph(str(num), style(align=TA_CENTER, size=11)),
             Paragraph(name_html, td_style),
