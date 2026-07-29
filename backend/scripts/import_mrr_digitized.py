@@ -89,6 +89,32 @@ def _f(s):
         return None
 
 
+# ── Нормализация ЕДИНИЦ базовых цен ────────────────────────────────────────────
+# Часть сборников МРР дают базовые цены в РУБЛЯХ (шапка «а, руб.»), а движок
+# трактует a/b standard-книг как ТЫС.РУБ → без нормализации цены завышены ×1000
+# (выброс). Единица подтверждена ПОСТРАНИЧНОЙ сверкой PDF (не по шапке — она
+# ненадёжна: 7.1/4.7 помечены «руб», а реально «тыс.руб»). Здесь — номера
+# сборников, чьи standard-значения в РУБЛЯХ → делим на 1000 при импорте.
+# Survey-книги (гл.3) НЕ включаем: их движок и так считает в рублях.
+MRR_RUBLE_STANDARD = {
+    "2.6", "5.3", "5.7", "7.7",
+    "8.1", "8.2", "8.3", "8.4", "8.5", "8.7",
+    "9.2", "9.7", "9.11", "9.12",
+}
+
+
+def _sbornik_num(code: str) -> str:
+    m = re.match(r"МРР-(\d+\.\d+)", code or "")
+    return m.group(1) if m else ""
+
+
+def _unit_scale(code: str, calc_method: str) -> float:
+    """0.001 если значения книги в рублях (нужен ÷1000), иначе 1.0."""
+    if calc_method == "standard" and _sbornik_num(code) in MRR_RUBLE_STANDARD:
+        return 0.001
+    return 1.0
+
+
 def parse_range(text):
     m = RE_RANGE.search(text or "")
     if not m:
@@ -169,6 +195,7 @@ def import_book(db, json_path, code, name, calc_method, log,
 
     seen_tn = {}
     n_rows = n_types = n_cond = 0
+    scale = _unit_scale(code, calc_method)   # ÷1000 для рублёвых standard-книг
     for t in data["tables"]:
         tn = table_num_of(t["id"])
         if tn in seen_tn:
@@ -238,7 +265,9 @@ def import_book(db, json_path, code, name, calc_method, log,
                     description=(r["name"] if _rownum(r["num"]) or not r["num"]
                                  else f"{r['num']} {r['name']}")[:900],
                     x_unit=(r["unit"] or "")[:100],
-                    x_min=x_min, x_max=x_max, a=a or 0, b=b,
+                    x_min=x_min, x_max=x_max,
+                    a=(a or 0) * scale,
+                    b=(b * scale if b is not None else None),
                 ))
                 n_rows += 1
             continue
@@ -294,7 +323,8 @@ def import_book(db, json_path, code, name, calc_method, log,
                         description=((f"{desc_base} [{col_note}]") if _rownum(r["num"]) or not r["num"]
                                      else f"{r['num']} {desc_base} [{col_note}]")[:900],
                         x_unit=(r["unit"] or "")[:100],
-                        x_min=None, x_max=None, a=0, b=price,
+                        x_min=None, x_max=None, a=0,
+                        b=(price * scale if price is not None else None),
                     ))
                     n_rows += 1
 
