@@ -87,8 +87,8 @@ _DESIGN_BLOCK = {
     "pd": "Разработка проектной документации",
     "rd": "Разработка рабочей документации",
 }
-# Порядок блоков на титуле: изыскания → обследования/прочие → ПД → РД → экспертиза
-_BLOCK_ORDER = {"survey": 0, "other": 1, "pd": 2, "rd": 3, "expertise": 4}
+# Порядок блоков на титуле: изыскания → обследования → прочие → ПД → РД → экспертиза
+_BLOCK_ORDER = {"survey": 0, "obsledovanie": 1, "other": 2, "pd": 3, "rd": 4, "expertise": 5}
 
 
 def _classify_position(p: dict) -> tuple[str, str]:
@@ -96,6 +96,9 @@ def _classify_position(p: dict) -> tuple[str, str]:
     # Изыскания: помечены work_category движком ИГИ; section_name = вид изыскания
     if "work_category" in p:
         return "survey", (p.get("section_name") or "Инженерные изыскания").strip()
+    # Обследования/обмеры (calc_method='obsledovanie') — отдельный блок, без ПД/РД
+    if p.get("work_kind") == "obsledovanie":
+        return "obsledovanie", "Обследования"
     sl = p.get("stage_label")
     if sl == "ПД":
         return "pd", _DESIGN_BLOCK["pd"]
