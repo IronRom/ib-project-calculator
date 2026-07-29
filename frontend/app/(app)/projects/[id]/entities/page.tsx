@@ -486,8 +486,21 @@ export default function CalcWorkspacePage() {
         )}
 
         {!extracting && !extractError && entities.length === 0 && (
-          <div style={{ padding: 48, textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
-            AI не смог извлечь объекты из ТЗ.
+          <div style={{ padding: '32px 24px', textAlign: 'center', color: 'var(--fg-3)', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
+            <div style={{ fontWeight: 600, color: 'var(--fg-2)' }}>AI не смог извлечь объекты из ТЗ.</div>
+            {(result?.missing_data?.length ?? 0) > 0 && (
+              <div style={{ maxWidth: 640, textAlign: 'left', background: 'var(--bg-raised)', border: 'var(--hairline)', borderRadius: 'var(--radius-md)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-2)' }}>Причина:</div>
+                {(result?.missing_data ?? []).map((m, i) => (
+                  <div key={i} style={{ fontSize: 12, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>• {m}</div>
+                ))}
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: 'var(--fg-3)', maxWidth: 560 }}>
+              Проверьте, что файлы ТЗ читаются (не пустой скан без текста), и повторите анализ.
+              Если повторяется — попробуйте другую модель в настройках администратора.
+            </div>
+            <Button variant="secondary" size="sm" onClick={startExtraction}>↻ Повторить анализ</Button>
           </div>
         )}
 

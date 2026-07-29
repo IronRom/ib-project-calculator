@@ -73,6 +73,93 @@ def _mv(ws, r, c1, c2, value=None, font=None, align=None, fill=None, fmt=None):
 def _row(r_h, ws, r): ws.row_dimensions[r].height = r_h
 
 
+def _money_ru(v: float) -> str:
+    """Russian money format: space thousands, comma decimal (34 039 712,50)."""
+    return f"{float(v):,.2f}".replace(",", " ").replace(".", ",")
+
+
+# ── Разбивка позиций на блоки-сметы (ЛС) ───────────────────────────────────────
+# Один блок = один лист ЛС + одна строка на титульном листе ПС. По образцу
+# сметчика: каждое изыскание — отдельный блок, обследования/прочие — отдельно,
+# ПД и РД — отдельные листы на ОДНИХ И ТЕХ ЖЕ позициях (цена сплитится по стадии).
+
+_DESIGN_BLOCK = {
+    "pd": "Разработка проектной документации",
+    "rd": "Разработка рабочей документации",
+}
+# Порядок блоков на титуле: изыскания → обследования/прочие → ПД → РД → экспертиза
+_BLOCK_ORDER = {"survey": 0, "other": 1, "pd": 2, "rd": 3, "expertise": 4}
+
+
+def _classify_position(p: dict) -> tuple[str, str]:
+    """(kind, block_name) для позиции по её полям (без хардкода справочников)."""
+    # Изыскания: помечены work_category движком ИГИ; section_name = вид изыскания
+    if "work_category" in p:
+        return "survey", (p.get("section_name") or "Инженерные изыскания").strip()
+    sl = p.get("stage_label")
+    if sl == "ПД":
+        return "pd", _DESIGN_BLOCK["pd"]
+    if sl == "РД":
+        return "rd", _DESIGN_BLOCK["rd"]
+    return "other", "Обследования и прочие работы"
+
+
+def build_blocks(result: dict) -> list[dict]:
+    """Сгруппировать positions в упорядоченные блоки-сметы.
+
+    Возвращает список блоков: {kind, name, column, positions, cost, sheet}.
+    column = 'survey' (→ графа «Изыскательских») | 'design' (→ «Проектных»).
+    АСУТП и прочие позиции со встроенной стадией (`_stage_embedded` +
+    `_kp_pd_frac`) растворяются в ПД/РД по доле — как в эталонной смете.
+    """
+    positions = result.get("positions", []) or []
+    order: list[tuple[str, str]] = []
+    blocks: dict[tuple[str, str], dict] = {}
+
+    def _bucket(kind: str, name: str) -> dict:
+        key = (kind, name)
+        b = blocks.get(key)
+        if b is None:
+            b = {
+                "kind": kind, "name": name,
+                "column": "survey" if kind == "survey" else "design",
+                "positions": [],
+            }
+            blocks[key] = b
+            order.append(key)
+        return b
+
+    for p in positions:
+        # Проектная позиция со встроенной стадией (АСУТП факторным методом) —
+        # НЕ изыскание — делим на доли ПД и РД, чтобы попала в оба листа.
+        if ("work_category" not in p and p.get("_stage_embedded")
+                and p.get("_kp_pd_frac") is not None):
+            frac = float(p["_kp_pd_frac"])
+            base_cost = float(p.get("cost", 0))
+            for kind, part, tag in (("pd", frac, "ПД"), ("rd", 1 - frac, "РД")):
+                if part <= 0:
+                    continue
+                q = dict(p)
+                q["cost"] = round(base_cost * part, 2)
+                q["stage_label"] = tag
+                q["formula"] = f'{p.get("formula", "")} (доля {tag})'
+                _bucket(kind, _DESIGN_BLOCK[kind])["positions"].append(q)
+            continue
+        kind, name = _classify_position(p)
+        _bucket(kind, name)["positions"].append(p)
+
+    ordered = sorted(
+        order, key=lambda k: (_BLOCK_ORDER.get(blocks[k]["kind"], 9), order.index(k))
+    )
+    out: list[dict] = []
+    for i, key in enumerate(ordered, 1):
+        b = blocks[key]
+        b["cost"] = round(sum(float(pp.get("cost", 0)) for pp in b["positions"]), 2)
+        b["sheet"] = f"ЛС-{i:02d}"
+        out.append(b)
+    return out
+
+
 # ── Ruble words ───────────────────────────────────────────────────────────────
 
 def _rub_words(amount: float) -> str:
@@ -190,9 +277,10 @@ def _write_ls_sheet(ws, ls_num: str, project_name: str, stage: str,
     _row(14, ws, r); r += 1
 
     # ── Positions ──────────────────────────────────────────────────────────────
-    for pos in positions:
+    # Нумерация в пределах листа — 1..N (позиции пришли из общего пула)
+    for pos_num, pos in enumerate(positions, 1):
         cost_tys = pos["cost"] / 1000
-        _mv(ws, r, 1, 1, pos["num"],          font=_F_MAIN, align=_AC)
+        _mv(ws, r, 1, 1, pos_num,             font=_F_MAIN, align=_AC)
         _mv(ws, r, 2, 5, pos["name"],          font=_F_MAIN, align=_AWT)
         _mv(ws, r, 6, 7, pos["justification"], font=_F_SM,   align=_AWT)
         _mv(ws, r, 8, 8, pos["formula"],       font=_F_SM,   align=_AWT)
@@ -229,7 +317,7 @@ def _write_ls_sheet(ws, ls_num: str, project_name: str, stage: str,
 
     _row(8, ws, r); r += 1
     ws.merge_cells(f"A{r}:I{r}")
-    _v(ws, r, 1, f"Итого по смете: {total_with_vat:,.2f} руб. ({_rub_words(total_with_vat)})",
+    _v(ws, r, 1, f"Итого по смете: {_money_ru(total_with_vat)} руб. ({_rub_words(total_with_vat)})",
        font=_F_MAIN, align=_AWT); _row(28, ws, r)
 
 
@@ -313,21 +401,26 @@ def _write_ps_sheet(ws, project_name: str, stage: str,
 
     for i, ls in enumerate(ls_info, 1):
         c_tys = ls["cost"] / 1000
+        is_survey = ls.get("column") == "survey"
+        izy_tys = c_tys if is_survey else 0
+        prj_tys = 0 if is_survey else c_tys
         _mv(ws, r, 1, 1, i,          font=_F_MAIN, align=_AC)
         _mv(ws, r, 2, 3, ls["name"], font=_F_MAIN, align=_AWT)
         _mv(ws, r, 4, 4, "",         font=_F_MAIN, align=_AL)
         _mv(ws, r, 5, 5, ls["sheet"],font=_F_MAIN, align=_AC)
-        _mv(ws, r, 6, 8, 0,          font=_F_MAIN, align=_AR, fmt=_THO)
-        _mv(ws, r, 9, 9, c_tys,      font=_F_MAIN, align=_AR, fmt=_THO)
+        _mv(ws, r, 6, 8, izy_tys,    font=_F_MAIN, align=_AR, fmt=_THO)
+        _mv(ws, r, 9, 9, prj_tys,    font=_F_MAIN, align=_AR, fmt=_THO)
         _mv(ws, r, N, N, c_tys,      font=_F_MAIN, align=_AR, fmt=_THO)
         _row(22, ws, r); r += 1
 
     # ── Итого row ─────────────────────────────────────────────────────────────
+    survey_no_vat = sum(ls["cost"] for ls in ls_info if ls.get("column") == "survey")
+    design_no_vat = total_no_vat - survey_no_vat
     t_tys  = total_no_vat / 1000
     _mv(ws, r, 1, 4, "Итого:",                    font=_F_BOLD, align=_AL, fill=_FILL_T)
     _mv(ws, r, 5, 5, "",                           fill=_FILL_T)
-    _mv(ws, r, 6, 8, 0,                            font=_F_BOLD, align=_AR, fill=_FILL_T, fmt=_THO)
-    _mv(ws, r, 9, 9, t_tys,                        font=_F_BOLD, align=_AR, fill=_FILL_T, fmt=_THO)
+    _mv(ws, r, 6, 8, survey_no_vat / 1000,         font=_F_BOLD, align=_AR, fill=_FILL_T, fmt=_THO)
+    _mv(ws, r, 9, 9, design_no_vat / 1000,         font=_F_BOLD, align=_AR, fill=_FILL_T, fmt=_THO)
     _mv(ws, r, N, N, t_tys,                        font=_F_BOLD, align=_AR, fill=_FILL_T, fmt=_THO)
     _row(18, ws, r); r += 1
 
@@ -364,7 +457,7 @@ def _write_ps_sheet(ws, project_name: str, stage: str,
     _row(8, ws, r); r += 1
     ws.merge_cells(f"A{r}:{get_column_letter(N)}{r}")
     _v(ws, r, 1,
-       f"Итого по смете: {grand_total:,.2f} руб. ({_rub_words(grand_total)})",
+       f"Итого по смете: {_money_ru(grand_total)} руб. ({_rub_words(grand_total)})",
        font=_F_MAIN, align=_AWT); _row(32, ws, r); r += 1
     ws.merge_cells(f"A{r}:{get_column_letter(N)}{r}")
     _v(ws, r, 1, "(сумма прописью)", font=_F_SM, align=_AC); _row(14, ws, r); r += 1
@@ -379,36 +472,25 @@ def _write_ps_sheet(ws, project_name: str, stage: str,
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def generate_2ps_excel(project_name: str, stage: str, result: dict[str, Any]) -> bytes:
-    positions = result.get("positions", [])
     vat_rate  = float(result.get("vat_rate", 22))
     quarter   = result.get("price_index_period", "")
 
-    # Group by section_num
-    sections: dict[int, dict] = {}
-    for pos in positions:
-        snum  = int(pos.get("section_num") or 0)
-        sname = pos.get("section_name") or ""
-        if snum not in sections:
-            sections[snum] = {"name": sname, "positions": []}
-        sections[snum]["positions"].append(pos)
+    # Разбивка на блоки-сметы: изыскания (по видам) / обследования / ПД / РД
+    blocks = build_blocks(result)
 
     wb = openpyxl.Workbook()
     ls_info: list[dict] = []
 
-    for i, snum in enumerate(sorted(sections.keys()), 1):
-        sec          = sections[snum]
-        ls_name      = f"ЛС-{i:02d}"
-        ws           = wb.create_sheet(title=ls_name)
-        sec_positions = sec["positions"]
-        sec_cost     = sum(p["cost"] for p in sec_positions)
-
-        _write_ls_sheet(ws, ls_name, project_name, stage,
-                        sec["name"] or project_name,
-                        sec_positions, vat_rate, quarter)
+    for b in blocks:
+        ws = wb.create_sheet(title=b["sheet"])
+        _write_ls_sheet(ws, b["sheet"], project_name, stage,
+                        b["name"] or project_name,
+                        b["positions"], vat_rate, quarter)
         ls_info.append({
-            "sheet": ls_name,
-            "name":  sec["name"] or project_name,
-            "cost":  sec_cost,
+            "sheet":  b["sheet"],
+            "name":   b["name"] or project_name,
+            "cost":   b["cost"],
+            "column": b["column"],
         })
 
     ps_ws = wb.create_sheet(title="ПС", index=0)
