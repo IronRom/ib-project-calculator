@@ -28,7 +28,13 @@ def _stage_splits_for_book(book, stage: str) -> list[tuple[str, float]]:
     """When stage="П+Р", emit two positions per entity: ПД then РД.
 
     Percentages come from the book (pd_pct/rd_pct), falling back to МУ №620.
+
+    Обследования/обмеры (calc_method='obsledovanie', напр. СБЦП-25) — это НЕ
+    проектная документация: по стадиям ПД/РД не делятся (эталон: одиночные
+    строки в отдельном блоке «Обследования»), считаются на полный объём.
     """
+    if getattr(book, "calc_method", "standard") == "obsledovanie":
+        return [("", 1.0)]
     pd = float(book.pd_pct) if getattr(book, "pd_pct", None) is not None else DEFAULT_PD_PCT
     rd = float(book.rd_pct) if getattr(book, "rd_pct", None) is not None else DEFAULT_RD_PCT
     return {
@@ -1171,6 +1177,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
                 "section_name":        stage_label or entity.get("section_name", ""),
                 "stage_label":         stage_label,
                 "stage_pct":           combined_pct,
+                "work_kind":           getattr(book, "calc_method", "standard"),
             })
 
     # ── ИГИ geological surveys ────────────────────────────────────────────────
