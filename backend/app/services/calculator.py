@@ -733,6 +733,27 @@ def _calculate_asutp_position(
     _MODULE_ATTR = {"ОР": "or", "ОО": "oo", "ИО": "io", "ТО": "to", "МО": "mo", "ПО": "po"}
     _unknown_opts: set[tuple[str, str]] = set()
 
+    # Калибровка: если в ТЗ нет количественных данных (x_value=null), факторы,
+    # назначенные AI, завышают цену в разы. Берём логически обоснованный МИНИМУМ —
+    # для каждого фактора опцию с наименьшей суммой баллов по модулям. Позиция
+    # ВСЁ РАВНО считается; на экране калибровки факторы можно поднять, иначе
+    # остаётся минимум.
+    _asutp_min_applied = False
+    if (entity.get("x_value") is None and entity.get("x_value_missing_reason")
+            and asutp_factors):
+        _min_factors: dict[str, str] = {}
+        for _fcode in asutp_factors:
+            _opts = (db.query(AsutpFactorOption)
+                     .filter(AsutpFactorOption.book_version_id == book.id,
+                             AsutpFactorOption.factor_code == _fcode).all())
+            if _opts:
+                _min_opt = min(_opts, key=lambda o: sum(
+                    (getattr(o, "score_" + a) or 0) for a in _MODULE_ATTR.values()))
+                _min_factors[_fcode] = _min_opt.option_code
+        if _min_factors:
+            asutp_factors = _min_factors
+            _asutp_min_applied = True
+
     for mod in modules:
         score_attr = "score_" + _MODULE_ATTR.get(mod.module_code, mod.module_code.lower())
 
@@ -784,11 +805,12 @@ def _calculate_asutp_position(
     # факторы — предположение AI, и позиция может быть завышена в разы.
     if warnings is not None and asutp_factors:
         factors_str_w = ", ".join(f"{k}={v}" for k, v in sorted(asutp_factors.items()))
-        if entity.get("x_value") is None and entity.get("x_value_missing_reason"):
+        if _asutp_min_applied:
             warnings.append(
-                f"{object_name}: факторы АСУТП ({factors_str_w}) назначены AI БЕЗ "
-                f"количественных данных в ТЗ (перечень операций/переменных/контуров "
-                f"отсутствует) — цена ОРИЕНТИРОВОЧНАЯ, подтвердите факторы вручную"
+                f"{object_name}: в ТЗ нет количественных данных для АСУТП "
+                f"(перечень операций/переменных/контуров отсутствует) — посчитано по "
+                f"МИНИМАЛЬНЫМ факторам ({factors_str_w}); поднимите факторы на экране "
+                f"калибровки, если по проекту требуется больше"
             )
         else:
             warnings.append(
