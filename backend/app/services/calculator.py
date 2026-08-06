@@ -49,6 +49,29 @@ def _norm_section_code(code: str) -> str:
     return code.strip().upper().removeprefix("ИОС.").strip()
 
 
+# ── Форма 3П: госэкспертиза (Пост. Правительства РФ № 145, Приложение) ──────────
+# ТАБЛИЦА ПРОЦЕНТНОГО СООТНОШЕНИЯ П от суммы (Спд+Сиж) в ценах 2001 г. (млн руб).
+# Нац. стандарт (не per-book) — хранится константой. Формула п.56:
+# РПнж = (Спд + Сиж) × П × Ki, где Спд/Сиж — стоимость ПД/изысканий в ценах 2001.
+_PGE_TABLE: list[tuple[float, float]] = [
+    (0, 33.75), (0.15, 29.25), (0.25, 27.3), (0.5, 20.22), (0.75, 16.65),
+    (1, 12.69), (1.5, 11.88), (3, 10.98), (4, 8.77), (6, 7.07), (8, 6.15),
+    (12, 4.76), (18, 4.13), (24, 3.52), (30, 3.06), (36, 2.62), (45, 2.33),
+    (52.5, 2.01), (60, 1.68), (70, 1.56), (80, 1.22), (100, 1.04), (120, 0.9),
+    (140, 0.8), (160, 0.73), (180, 0.66), (200, 0.61), (220, 0.58),
+]
+
+
+def _pge_percent(sum_2001_rub: float) -> float:
+    """П (%) по Приложению к Пост. 145 — от суммы Спд+Сиж (руб, цены 2001)."""
+    mln = sum_2001_rub / 1_000_000
+    pct = _PGE_TABLE[0][1]
+    for lo, p in _PGE_TABLE:
+        if mln > lo:
+            pct = p
+    return pct
+
+
 def _section_shares(
     db: Session, book_version_id: int, table_num: Optional[int], stage_label: str,
 ) -> dict[str, tuple[str, str, float]]:
@@ -1219,6 +1242,53 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             p["num"] = len(positions) + 1
             positions.append(p)
         errors.extend(igi_errors)
+
+    # ── Форма 3П: госэкспертиза (Пост. Правительства РФ № 145 п.56) ────────────
+    # Триггер: entity с «экспертиз» в названии/типе или флаг include_expertise.
+    # РПнж = (Спд + Сиж) × П × Ki; Спд — проектная документация (ПД), Сиж —
+    # изыскания, в базовых нормативных ценах (сумма cost_base). Ориентировочно:
+    # при смешанных базах книг «цены 2001» приблизительны.
+    _want_expertise = entities_dict.get("include_expertise") or any(
+        "экспертиз" in ((e.get("object_name") or "") + " " + (e.get("object_type") or "")).lower()
+        for e in entities)
+    if _want_expertise and positions:
+        # Текущая стоимость ПД (проектная документация) и изысканий.
+        design_cur = sum(p["cost"] for p in positions
+                         if "work_category" not in p and p.get("stage_label") == "ПД")
+        sizh_cur = sum(p["cost"] for p in positions if "work_category" in p)
+        if design_cur + sizh_cur > 0:
+            ki_rec = _get_quarterly_index(db, 2001)
+            ki = float(ki_rec.index_value) if ki_rec else 1.0
+            # Спд+Сиж в ценах 2001 (для выбора брекета П) = текущие / индекс 2001
+            spd2001 = design_cur / ki if ki else design_cur
+            sizh2001 = sizh_cur / ki if ki else sizh_cur
+            pge = _pge_percent(spd2001 + sizh2001)
+            # РПнж=(Спд2001+Сиж2001)×П×Ki ≡ (Спд+Сиж)тек×П (индекс сокращается)
+            exp_cost = round((design_cur + sizh_cur) * pge / 100, 2)
+            ki_period = (f"{ROMAN.get(ki_rec.quarter, ki_rec.quarter)} кв. {ki_rec.year} г."
+                         if ki_rec else "—")
+            positions.append({
+                "num": len(positions) + 1,
+                "name": "Стоимость государственной экспертизы (форма 3П)",
+                "row_description": "Пост. Правительства РФ № 145, п.56 + Приложение (таблица П)",
+                "unit": "раздел", "quantity": 1, "item_count": 1,
+                "justification": (
+                    f"Пост. 145 п.56: РПнж=(Спд+Сиж)×П×Ki; "
+                    f"Спд+Сиж(2001)={_fmt_ru(round((spd2001 + sizh2001) / 1000, 1))} тыс, "
+                    f"П={_fmt_ru(pge)}% (брекет прил.), Ki={_fmt_ru(ki)}"),
+                "formula": f"({_fmt_ru(round(design_cur + sizh_cur))})×{_fmt_ru(pge)}%",
+                "cost": exp_cost, "cost_base": round((design_cur + sizh_cur) * pge / 100 / ki, 2) if ki else exp_cost,
+                "book_code": "Пост.145", "price_base_year": 2001,
+                "price_index": ki, "price_index_period": ki_period,
+                "price_index_justification": (ki_rec.source_ref if ki_rec else "индекс 2001 не задан"),
+                "table_num": None, "row_num": None, "used_minimum": False,
+                "section_num": 0, "section_name": "Экспертиза",
+                "stage_label": "", "block_kind": "expertise",
+            })
+            warnings.append(
+                "Стоимость госэкспертизы (форма 3П) посчитана ОРИЕНТИРОВОЧНО по Пост. 145 "
+                "(база — нормативные цены Спд+Сиж, П по брекету приложения); при смешанных "
+                "базах справочников уточните величину «цен 2001» по факту.")
 
     # ── Aggregate ─────────────────────────────────────────────────────────────
     base_cost    = sum(p["cost_base"] for p in positions)

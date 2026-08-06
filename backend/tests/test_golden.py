@@ -505,3 +505,15 @@ def test_reisovaya_building_nz848(db):
     assert not r["errors"], r["errors"]
     assert math.isclose(_one(r, "ПД")["cost"], 8_692_296.48, rel_tol=1e-4)
     assert math.isclose(_one(r, "РД")["cost"], 13_038_444.72, rel_tol=1e-4)
+
+
+def test_expertise_form3p_pge_table(db):
+    """[Пост. Правительства РФ № 145, Приложение] Таблица П форма 3П:
+    Спд+Сиж=1,667 млн (2001) → брекет «более 1,5» → П=11,88% (эталон Самолёта ЛС-08:
+    866 349 = 847 965 × 0,1188 × 8,6)."""
+    from app.services.calculator import _pge_percent
+    assert _pge_percent(1_667_000) == 11.88     # эталонный брекет
+    assert _pge_percent(100_000) == 33.75        # 0,1 млн → 0-0,15
+    assert _pge_percent(500_001) == 20.22        # более 0,5
+    assert _pge_percent(5_000_000) == 8.77       # более 4
+    assert _pge_percent(250_000_000) == 0.58     # более 220
