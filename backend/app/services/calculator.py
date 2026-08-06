@@ -374,24 +374,16 @@ def _match_row(
 
         if mins and x_eff < min(v for v, _ in mins):
             bval, brow = min(mins, key=lambda t: t[0])
-            if pricing_method == "mu620" and bval > 0 and x_eff < 0.5 * bval:
-                # МУ №620 п.2.1.3: ниже Xмин/2 формула неприменима (ф.3П);
-                # консервативно считаем в точке Xмин/2
-                extrap_note = (
-                    f"экстраполяция (X={x_eff:.4g} < Xмин/2={0.5 * bval:.4g}, "
-                    f"X_расч ограничен — МУ №620 п.2.1.3, далее ф.3П)"
-                )
-                return _mk(
-                    brow, x_eff, True, bval, _join(note, extrap_note),
-                    x_capped=0.5 * bval,
-                )
-            # 707/пр п.131 ф.8.4/8.5: X меньше половины минимального показателя →
-            # цена на X=Xмин/2 (по ф.8.2), умноженная на Кэ = X/(0.5·Xмин), но не менее 0.1
+            # X меньше половины минимального показателя → цена в точке X=Xмин/2
+            # (по ф.8.2), умноженная на Кэ = X/(0.5·Xмин), но не менее 0.1.
+            # 707/пр: п.131 ф.8.4/8.5. МУ №620/СБЦП: п.2.1.3 в трактовке разъяснений
+            # ЦИП (2006) — тот же Кэ (эталонные сметы Инфостроя считают так).
             if pricing_method != "mrr" and bval > 0 and x_eff < 0.5 * bval:
                 scale = max(0.1, x_eff / (0.5 * bval))
+                src = ("707/пр п.131 ф.8.4" if pricing_method == "707pr"
+                       else "МУ №620 п.2.1.3 (разъяснения ЦИП)")
                 extrap_note = (
-                    f"707/пр п.131 ф.8.4 (X={x_eff:.4g} < Xмин/2={0.5 * bval:.4g}, "
-                    f"Кэ={scale:.3g})"
+                    f"{src} (X={x_eff:.4g} < Xмин/2={0.5 * bval:.4g}, Кэ={scale:.3g})"
                 )
                 return _mk(
                     brow, x_eff, True, bval, _join(note, extrap_note),

@@ -140,19 +140,26 @@ def test_mu620_upper_cap(db):
     assert "ограничен" in p["justification"] or "Xмакс" in p["justification"]
 
 
-def test_mu620_lower_cap(db):
-    """[МУ-620 п.2.1.3] СБЦП-книга, X ниже Xмин/2 → X_расч = Xмин/2 + warning
-    (ф.8.4/Кэ применяется только к НЗ-книгам по 707/пр)."""
-    r = calculate({"stage": "П", "region": "-", "entities": [_ent(
-        object_name="lowcap", sbts_code="СБЦП 81-2001-17", sbts_table=10,
-        x_value=0.05, x_unit="тыс. м3/сут",  # Xмин табл.10 = 1? → ниже половины
+def test_mu620_lower_ke(db):
+    """[МУ-620 п.2.1.3, разъяснения ЦИП-2006] mu620-книга, X ниже Xмин/2 → Кэ
+    (как для 707/пр), НЕ кап/ф.3П. Канализация СБЦП-2001-05 т.8 (эталон Рейсовой):
+    X=30 < Xмин/2=50 → Кэ=0,6, ПД=(23100+90×70)×0,6×0,4×7,1 = 50 097,6 руб."""
+    from app.models import ReferenceBook, ReferenceRow
+    b = db.query(ReferenceBook).filter(ReferenceBook.code == "СБЦП 81-2001-05").first()
+    if not b:
+        return  # книга не импортирована в этой БД — пропуск
+    row = (db.query(ReferenceRow)
+           .filter(ReferenceRow.book_version_id == b.id,
+                   ReferenceRow.table_num == 8, ReferenceRow.a == 23.1).first())
+    if not row:
+        return
+    r = calculate({"stage": "П+Р", "region": "Москва", "entities": [_ent(
+        object_name="Канализация", sbts_code="СБЦП 81-2001-05", sbts_table=8,
+        sbts_object_type_id=row.object_type_id, x_value=30, x_unit="м",
     )]}, db)
-    ps = _pos(r, "ПД")
-    if ps:  # если Xмин строки >0.1
-        p = ps[0]
-        assert p["cost"] > 0
-        ok = any("3П" in w for w in r["warnings"]) or "Кэ" not in p["formula"]
-        assert ok, (p, r["warnings"])
+    pd = next((p["cost"] for p in r["positions"] if p.get("stage_label") == "ПД"), None)
+    assert pd and math.isclose(pd, 50_097.6, abs_tol=1.0), pd
+    assert not any("3П" in w for w in r["warnings"]), r["warnings"]
 
 
 # ── Барвиха: МРР (mrr) ───────────────────────────────────────────────────
