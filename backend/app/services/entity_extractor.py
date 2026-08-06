@@ -1299,8 +1299,14 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
     types_ctx = _build_types_context(db, detected_codes) if db is not None else ""
     hints_ctx = _build_hints_context(db, detected_codes) if db is not None else ""
     msg1_text = (
-        "Проанализируй ТЗ и извлеки все объекты. "
-        "Вызови функцию extract_pir_entities.\n\n"
+        "Проанализируй ТЗ и извлеки все объекты. Вызови функцию extract_pir_entities.\n\n"
+        "СНАЧАЛА определи ГЛАВНЫЙ объект(ы) капитального строительства — само "
+        "ЗДАНИЕ/СООРУЖЕНИЕ/КОРПУС, для которого выполняется ПД (по наименованию "
+        "объекта в шапке ТЗ и по составу разделов ПД: наличие разделов АР "
+        "«архитектурные решения», КР/КЖ/КМ «конструктивные решения», обследование "
+        "строительных конструкций ⇒ проектируется здание/сооружение, и оно ОБЯЗАНО "
+        "быть отдельным объектом с площадью или строительным объёмом). ПОТОМ — "
+        "инженерные системы, сети, изыскания, обследования.\n\n"
     )
     if types_ctx:
         msg1_text += types_ctx + "\n\n"
@@ -1357,10 +1363,14 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
                 f"{e.object_name}" for e in result.entities if e.object_name
             )[:2500]
             sweep_user = (
-                "Проверь ПОЛНОТУ по чек-листу (изыскания — все виды; обследования/обмеры; "
-                "каждое здание; КАЖДАЯ инженерная система здания отдельно: отопление, "
-                "вентиляция, ГВС, ХВС, канализация, электро, слаботочка/ИТСО, связь, АСУ; "
-                "наружные сети). Уже извлечены позиции:\n" + have + "\n\n"
+                "Проверь ПОЛНОТУ по чек-листу: (1) ГЛАВНЫЙ объект капитального "
+                "строительства — само ЗДАНИЕ/СООРУЖЕНИЕ/КОРПУС (если проектируются "
+                "разделы АР/КР/КЖ/КМ или обследуются его конструкции — здание ОБЯЗАНО "
+                "быть отдельным объектом с площадью/строительным объёмом); (2) изыскания — "
+                "все виды; (3) обследования/обмеры; (4) КАЖДАЯ инженерная система здания "
+                "отдельно: отопление, вентиляция, ГВС, ХВС, канализация, электро, "
+                "слаботочка/ИТСО, связь, АСУ; (5) наружные сети. Уже извлечены позиции:\n"
+                + have + "\n\n"
                 "Вызови extract_pir_entities ЕЩЁ РАЗ и верни в entities ТОЛЬКО позиции, "
                 "которых НЕТ в списке выше (пропущенные из ТЗ). Не повторяй уже извлечённые. "
                 "Если ничего не пропущено — верни пустой entities."
@@ -1389,6 +1399,65 @@ async def extract_entities_openrouter(text: str, model_id: str, db=None,
                     _progress(f"Добор полноты: +{len(added)} позиций")
         except Exception:
             pass  # добор не критичен — исходные позиции уже есть
+
+    # ── Гард полноты: главный объект капстроительства (здание/сооружение) ──────
+    # Универсально и детерминированно: если извлечены ВНУТРЕННИЕ элементы здания
+    # (обследование конструкций, отопление/вентиляция, архитектурно-конструктивные
+    # решения), значит здание ЕСТЬ и обязано быть объектом. Нет объекта-здания →
+    # прицельный до-запрос именно здания + громкий варнинг. На чисто-сетевых
+    # проектах (только наружные сети/благоустройство) не срабатывает.
+    if db is not None and result.entities:
+        def _is_building(e) -> bool:
+            s = ((e.object_type or "") + " " + (e.object_name or "")).lower()
+            return any(k in s for k in ("здани", "сооружен", "корпус", "павильон",
+                                        "объект капитальн", "цех", "блок"))
+        _BLD_SIGNALS = ("обследование строительных конструкц", "обследование несущих",
+                        "строительных конструкций здани", "несущих конструкц",
+                        "конструктивные решени", "архитектурные решени",
+                        "отоплени", "вентиляц")
+        def _needs_building(e) -> bool:
+            s = ((e.object_type or "") + " " + (e.object_name or "")).lower()
+            return any(k in s for k in _BLD_SIGNALS)
+        if (any(_needs_building(e) for e in result.entities)
+                and not any(_is_building(e) for e in result.entities)):
+            _rs = [e.object_name for e in result.entities if _needs_building(e)][:3]
+            try:
+                assistant_msg1 = data1["choices"][0]["message"]
+                ask = (
+                    "В ТЗ проектируются/обследуются ВНУТРЕННИЕ элементы здания "
+                    f"({', '.join(str(r) for r in _rs)}), но сам ГЛАВНЫЙ объект "
+                    "капитального строительства (здание/корпус/сооружение) не извлечён. "
+                    "Извлеки его: наименование, назначение, площадь или строительный объём, "
+                    "стадия. Вызови extract_pir_entities и верни ТОЛЬКО этот объект. "
+                    "Если в ТЗ проектируются только системы/сети существующего здания без "
+                    "его реконструкции — верни пустой entities."
+                )
+                gmsg = [
+                    {"role": "user", "content": msg1_content},
+                    {"role": "assistant", "content": assistant_msg1.get("content") or "",
+                     "tool_calls": assistant_msg1.get("tool_calls", [])},
+                    {"role": "tool", "tool_call_id": tool_calls[0]["id"],
+                     "content": tool_calls[0]["function"]["arguments"]},
+                    {"role": "user", "content": ask},
+                ]
+                gdata = await _call(gmsg, [EXTRACTION_TOOL_OPENAI],
+                                    "extract_pir_entities", 4096)
+                gtc = gdata.get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
+                if gtc:
+                    gres = ExtractionResult(**json.loads(gtc[0]["function"]["arguments"]))
+                    gadd = [e for e in gres.entities if _is_building(e)]
+                    if gadd:
+                        result.entities.extend(gadd)
+                        _fill_sbts_table_from_type_id(result, db)
+                        _fill_sbts_codes(result, db, detected_codes)
+                        _progress(f"Добор главного объекта: +{len(gadd)}")
+            except Exception:
+                pass
+            if not any(_is_building(e) for e in result.entities):
+                result.missing_data.append(
+                    "ВНИМАНИЕ: в ТЗ проектируются/обследуются внутренние элементы здания, "
+                    "но ГЛАВНЫЙ объект (здание/сооружение) не распознан — проверьте ТЗ и "
+                    "добавьте здание вручную, иначе смета сильно занижена.")
 
     if not result.entities or db is None:
         _flag_missing_x_values(result)
