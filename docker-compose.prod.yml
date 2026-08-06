@@ -40,6 +40,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      or-proxy:
+        condition: service_started
     ports:
       - "127.0.0.1:8010:8000"
     volumes:
@@ -73,6 +75,17 @@ services:
       - "127.0.0.1:3010:3000"
     depends_on:
       - backend
+
+  # Egress-прокси для OpenRouter: OpenRouter гео-блокирует российский IP прод-
+  # сервера (403 "Access denied by security policy"). gost выступает клиентом
+  # shadowsocks к ноде в Германии (45.11.24.128) и поднимает локальный HTTP-прокси
+  # на :8118 — backend ходит через него (OPENROUTER_PROXY=http://or-proxy:8118).
+  # Параметры SS-сервера — в /opt/pir/.env (SS_CIPHER/SS_PASSWORD/SS_HOST/SS_PORT).
+  or-proxy:
+    image: ginuerzh/gost
+    container_name: or-proxy
+    restart: unless-stopped
+    command: -L=http://:8118 -F=ss://${SS_CIPHER}:${SS_PASSWORD}@${SS_HOST}:${SS_PORT}
 
 volumes:
   pgdata:
