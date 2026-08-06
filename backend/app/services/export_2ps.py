@@ -96,6 +96,9 @@ def _classify_position(p: dict) -> tuple[str, str]:
     # Изыскания: помечены work_category движком ИГИ; section_name = вид изыскания
     if "work_category" in p:
         return "survey", (p.get("section_name") or "Инженерные изыскания").strip()
+    # Госэкспертиза (форма 3П, Пост. 145) — отдельный блок
+    if p.get("block_kind") == "expertise":
+        return "expertise", "Стоимость государственной экспертизы"
     # Обследования/обмеры (calc_method='obsledovanie') — отдельный блок, без ПД/РД
     if p.get("work_kind") == "obsledovanie":
         return "obsledovanie", "Обследования"
