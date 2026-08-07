@@ -299,24 +299,26 @@ def _match_row(
         kw.setdefault("type_fallback", type_fallback)
         return RowMatch(*args, **kw)
 
-    # ── X-fallback: X не указан в ТЗ → УСЛОВНОЕ значение, но никогда не 0 ──
-    # Первая (минимальная) строка таблицы, X = её верхняя граница диапазона;
-    # штучные строки (без диапазона, цена за единицу) → 1 шт.
+    # ── X-fallback: X не указан в ТЗ → УСЛОВНЫЙ МИНИМУМ (не завышаем) ──
+    # Наименьшая валидная точка таблицы: первая (дешёвая) строка, X = её НИЖНЯЯ
+    # граница диапазона. Флэт «до N» (без нижней границы) и штучные — как есть.
+    # Так условная цена — минимальная реалистичная, а не максимум брекета
+    # (защита от ×2). Реальное значение вводится на экране финализации.
     if x_value is None:
-        def _row_bound(r: ReferenceRow) -> float:
-            if r.x_max is not None:
-                return float(r.x_max)
+        def _row_key(r: ReferenceRow) -> float:
             if r.x_min is not None:
                 return float(r.x_min)
+            if r.x_max is not None:
+                return float(r.x_max)
             return float("inf")  # штучные — в конец сортировки
 
-        first_row = min(all_rows, key=_row_bound)
-        if first_row.x_max is not None:
-            x_eff = float(first_row.x_max)
-        elif first_row.x_min is not None:
-            x_eff = float(first_row.x_min)
+        first_row = min(all_rows, key=_row_key)
+        if first_row.x_min is not None:
+            x_eff = float(first_row.x_min)      # нижняя граница диапазона = минимум
+        elif first_row.x_max is not None:
+            x_eff = float(first_row.x_max)      # «до N»: цена ~постоянна в брекете
         else:
-            x_eff = 1.0  # штучная строка: цена за единицу × 1
+            x_eff = 1.0                          # штучная строка: цена за единицу × 1
         if x_eff <= 0:
             x_eff = 1.0
         return _mk(first_row, x_eff, False, None, "", used_minimum=True)
@@ -1097,7 +1099,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             justification += "]"
             is_unit_row = row.x_min is None and row.x_max is None
             basis = ("штучная позиция — принята 1 ед." if is_unit_row
-                     else "верхняя граница первой строки таблицы")
+                     else "условный минимум (нижняя граница первой строки таблицы)")
             warnings.append(
                 f"{object_name}: X отсутствует в ТЗ — УСЛОВНО принято "
                 f"X={_fmt_ru(match.x_effective)} {row_unit or 'ед.'} "
@@ -1210,6 +1212,10 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
                 "table_num":           table_num,
                 "row_num":             row_num,
                 "used_minimum":        match.used_minimum,
+                # условный X на ДИАПАЗОННОЙ таблице (не штучная) → нужен ввод объёма
+                "x_conditional":       match.used_minimum and not (
+                    row.x_min is None and row.x_max is None),
+                "object_name":         object_name,
                 "section_num":         entity.get("section_num", 0),
                 "section_name":        stage_label or entity.get("section_name", ""),
                 "stage_label":         stage_label,

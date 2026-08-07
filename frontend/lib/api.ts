@@ -636,9 +636,34 @@ export function patchStage(projectId: number, calcId: number, stage: 'П' | 'Р'
     { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stage }) })
 }
 
-export function finalizeCalc(projectId: number, calcId: number) {
-  return request<{ status: string; total_with_vat: number; exports: { kind: string; filename: string }[]; warnings: string[] }>(
-    `/projects/${projectId}/calculations/${calcId}/finalize`, { method: 'POST' })
+export interface MissingXPosition {
+  object_name: string
+  name: string
+  unit: string
+  description: string
+  conditional_x: number | null
+  cost: number
+}
+
+export type FinalizeResult =
+  | { ok: true }
+  | { ok: false; missing: MissingXPosition[]; message: string }
+
+export async function finalizeCalc(
+  projectId: number, calcId: number,
+  opts?: { x_values?: Record<string, number>; confirm_missing?: boolean },
+): Promise<FinalizeResult> {
+  const res = await fetch(
+    `${BASE}/projects/${projectId}/calculations/${calcId}/finalize`,
+    { method: 'POST', headers: headers(), body: JSON.stringify(opts || {}) },
+  )
+  if (res.ok) return { ok: true }
+  const data = await res.json().catch(() => ({}))
+  const detail = data?.detail
+  if (res.status === 409 && detail?.code === 'missing_x') {
+    return { ok: false, missing: detail.positions || [], message: detail.message || '' }
+  }
+  throw new Error(typeof detail === 'string' ? detail : `HTTP ${res.status}`)
 }
 
 export function exportDownloadUrl(projectId: number, calcId: number, kind: string) {
