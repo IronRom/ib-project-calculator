@@ -7,7 +7,7 @@ import {
   getUnitCheck, startExtractionJob, getExtractionStatus, listCalculations,
   clarifyCalc, finalizeCalc, createVersion, downloadExportFile,
   Calculation, ExtractedEntity, CalculationResult,
-  Project, UnitCheckItem, CalcListItem, ClarifyDiff,
+  Project, UnitCheckItem, CalcListItem, ClarifyDiff, MissingXPosition,
 } from '@/lib/api'
 import { Topbar } from '@/components/layout/Topbar'
 import { Button } from '@/components/ui/Button'
@@ -95,6 +95,9 @@ export default function CalcWorkspacePage() {
   const [clarifyDiff, setClarifyDiff] = useState<ClarifyDiff | null>(null)
 
   const [finalizing, setFinalizing] = useState(false)
+  const [missingX, setMissingX] = useState<MissingXPosition[] | null>(null)
+  const [missingXMsg, setMissingXMsg] = useState('')
+  const [xInputs, setXInputs] = useState<Record<string, string>>({})
   const [stageBusy, setStageBusy] = useState(false)
 
   const readOnly = meta?.status === 'final'
@@ -310,12 +313,22 @@ export default function CalcWorkspacePage() {
     }
   }
 
-  async function handleFinalize() {
-    if (!confirm('Финализировать расчёт? Версия будет заморожена, будут сформированы файлы 2ПС и КП; правки — только в новой версии.')) return
+  async function handleFinalize(confirmMissing = false, xValues: Record<string, number> = {}) {
     setFinalizing(true); setCalcError('')
     try {
       await savePendingOverrides()
-      await finalizeCalc(Number(id), Number(calcId))
+      const r = await finalizeCalc(Number(id), Number(calcId),
+        { x_values: xValues, confirm_missing: confirmMissing })
+      if (!r.ok) {
+        // Гейт объёмов: показываем модалку ввода натуральных показателей
+        setMissingX(r.missing); setMissingXMsg(r.message)
+        const init: Record<string, string> = {}
+        r.missing.forEach(p => { init[p.object_name] = '' })
+        setXInputs(init)
+        setFinalizing(false)
+        return
+      }
+      setMissingX(null)
       await refreshMeta()
       const c = await getCalculation(Number(id), Number(calcId))
       setCalc(c)
@@ -325,6 +338,16 @@ export default function CalcWorkspacePage() {
     } finally {
       setFinalizing(false)
     }
+  }
+
+  function submitMissingX() {
+    const xv: Record<string, number> = {}
+    Object.entries(xInputs).forEach(([k, v]) => {
+      const n = parseFloat((v || '').replace(',', '.'))
+      if (!isNaN(n) && n > 0) xv[k] = n
+    })
+    setMissingX(null)
+    handleFinalize(true, xv)   // confirm: незаполненные → условный минимум
   }
 
   async function handleNewVersion() {
@@ -718,12 +741,53 @@ export default function CalcWorkspacePage() {
                       {computing ? 'Расчёт…' : '↻ Пересчитать'}
                     </Button>
                     {calcResult && (
-                      <Button variant="primary" disabled={finalizing || computing} onClick={handleFinalize}>
+                      <Button variant="primary" disabled={finalizing || computing} onClick={() => handleFinalize()}>
                         {finalizing ? 'Финализация…' : '✓ Финализировать расчёт'}
                       </Button>
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ═══ Гейт объёмов при финализации ═══ */}
+            {missingX && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 50,
+                display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, overflowY: 'auto' }}
+                onClick={() => setMissingX(null)}>
+                <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-elevated)', border: 'var(--hairline)',
+                  borderRadius: 'var(--radius-lg)', maxWidth: 720, width: '100%', marginTop: 40, padding: 22,
+                  display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>Уточните объёмы перед финализацией</div>
+                  <div style={{ fontSize: 13, color: 'var(--fg-3)' }}>{missingXMsg}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '52vh', overflowY: 'auto' }}>
+                    {missingX.map((p, i) => (
+                      <div key={p.object_name + i} style={{ display: 'flex', gap: 12, alignItems: 'center',
+                        padding: '10px 12px', background: 'var(--bg-raised)', borderRadius: 'var(--radius-md)',
+                        border: i === 0 ? '1px solid var(--accent)' : 'var(--hairline)' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{p.name}{i === 0 && <span style={{ color: 'var(--accent)', fontSize: 11 }}> · ключевой драйвер</span>}</div>
+                          {p.description && <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>{p.description}</div>}
+                          <div style={{ fontSize: 11, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>
+                            без ввода → условный минимум {p.conditional_x} {p.unit} (~{Math.round(p.cost / 1000)} тыс)
+                          </div>
+                        </div>
+                        <input type="text" inputMode="decimal" placeholder={String(p.conditional_x ?? '')}
+                          value={xInputs[p.object_name] ?? ''}
+                          onChange={e => setXInputs(s => ({ ...s, [p.object_name]: e.target.value }))}
+                          style={{ width: 96, padding: '7px 9px', borderRadius: 6, border: 'var(--hairline)',
+                            background: 'var(--bg-base)', color: 'var(--fg-1)', fontSize: 13, textAlign: 'right' }} />
+                        <div style={{ fontSize: 12, color: 'var(--fg-3)', width: 48 }}>{p.unit}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                    <Button variant="secondary" size="sm" onClick={() => setMissingX(null)}>Отмена</Button>
+                    <Button variant="primary" size="sm" disabled={finalizing} onClick={submitMissingX}>
+                      {finalizing ? 'Финализация…' : 'Финализировать'}
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
 

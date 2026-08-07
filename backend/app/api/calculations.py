@@ -923,15 +923,44 @@ async def clarify_calculation(
     return {"preview": False, "diff": diff, "result": result}
 
 
+class FinalizeRequest(BaseModel):
+    # {object_name: X} — введённые пользователем натуральные объёмы
+    x_values: dict[str, float] = {}
+    # подтвердить финал с условными минимумами для незаполненных
+    confirm_missing: bool = False
+
+
+def _missing_x_positions(result: dict) -> list[dict]:
+    """Позиции с условным X (диапазонная таблица, объём не задан) — для гейта.
+    Дедуп по object_name, крупные драйверы вперёд (сортировка по цене убыв.)."""
+    agg: dict[str, dict] = {}
+    for p in result.get("positions", []):
+        if not p.get("x_conditional"):
+            continue
+        key = p.get("object_name") or p.get("name") or ""
+        rec = agg.setdefault(key, {
+            "object_name": key,
+            "name": p.get("name") or key,
+            "unit": p.get("unit", ""),
+            "description": (p.get("row_description") or "")[:140],
+            "conditional_x": p.get("quantity"),
+            "cost": 0.0,
+        })
+        rec["cost"] += float(p.get("cost", 0))
+    return sorted(agg.values(), key=lambda r: r["cost"], reverse=True)
+
+
 @router.post("/{calc_id}/finalize")
 def finalize_calculation(
     project_id: int,
     calc_id: int,
+    body: FinalizeRequest = FinalizeRequest(),
     current_user: User = Depends(require_calculate),
     db: Session = Depends(get_db),
 ):
-    """Финализация: свежий пересчёт → генерация 2ПС/КП → заморозка версии."""
+    """Финализация: гейт объёмов → пересчёт → генерация 2ПС/КП → заморозка."""
     import os
+    from sqlalchemy.orm.attributes import flag_modified
     from app.config import settings as cfg
     from app.services.calculator import calculate
     from app.services.export_2ps import generate_2ps_excel
@@ -944,7 +973,28 @@ def finalize_calculation(
     if not (ee.get("entities") or ee.get("geological_surveys")):
         raise HTTPException(status_code=422, detail="Нечего финализировать")
 
+    # Применяем введённые на экране финализации объёмы X (по object_name)
+    if body.x_values:
+        for ent in ee.get("entities", []):
+            nm = ent.get("object_name")
+            if nm in body.x_values and body.x_values[nm] is not None:
+                ent["x_value"] = float(body.x_values[nm])
+                ent.pop("x_value_missing_reason", None)
+        flag_modified(calc, "extracted_entities")
+        db.commit()
+
     result = calculate(ee, db)
+
+    # ── Гейт: остались позиции с условным минимумом → требуем подтверждения ──
+    missing = _missing_x_positions(result)
+    if missing and not body.confirm_missing:
+        raise HTTPException(status_code=409, detail={
+            "code": "missing_x",
+            "message": ("В ТЗ отсутствуют натуральные показатели объёма по позициям "
+                        "ниже. Введите их или подтвердите расчёт по условному минимуму "
+                        "(нижняя граница таблицы)."),
+            "positions": missing,
+        })
     calc.price_index_id = result.pop("_price_index_id", None)
     calc.calculation_result = result
     stage = ee.get("stage", "П+Р")
