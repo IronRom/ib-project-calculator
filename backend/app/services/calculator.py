@@ -60,6 +60,92 @@ def _is_count_unit(u: str) -> bool:
     return any(k in (u or "").lower() for k in _COUNT_UNITS)
 
 
+# ── Автосборка изысканий: минимальный состав «по умолчанию» ─────────────────────
+# Каждая работа: (ключевые слова для поиска строки в книге, work_category,
+# условный минимальный объём). Отчёт/программа добавляются igi_calculator'ом
+# автоматически (report_table/program_table). Реальные объёмы — в гейте/вкладке.
+_SURVEY_DEFAULTS: dict[str, list[tuple[list[str], str, float]]] = {
+    "geodesy": [
+        (["топографическ", "инженерно-топографическ", "тахеометрическ"], "field", 1.0),
+        (["камеральн"], "kameral", 1.0),
+    ],
+    "geology": [
+        (["рекогносциров"], "field", 1.0),
+        (["проходка", "бурени", "скважин"], "field", 1.0),
+        (["отбор монолит", "отбор проб", "монолит"], "field", 1.0),
+        (["влажност", "плотност", "физических свойств"], "lab", 1.0),
+        (["камеральн"], "kameral", 1.0),
+    ],
+    "ecology": [
+        (["маршрутн", "рекогносциров"], "field", 1.0),
+        (["отбор проб", "проб почв", "проб воды"], "field", 1.0),
+        (["химическ", "содержания", "загрязн"], "lab", 1.0),
+        (["камеральн"], "kameral", 1.0),
+    ],
+    "hydromet": [
+        (["рекогносциров"], "field", 1.0),
+        (["камеральн", "характеристик", "климатическ"], "kameral", 1.0),
+    ],
+}
+
+
+def _survey_category(book_code: str) -> str:
+    c = (book_code or "").lower()
+    if "812" in c or "игди" in c or "геодез" in c:
+        return "geodesy"
+    if "экол" in c or "иэи" in c or "гидромет" in c and "экол" in c:
+        return "ecology"
+    if "гидромет" in c or "игми" in c:
+        return "hydromet"
+    return "geology"  # дефолт: ИГИ/281/МРР-3.2 и т.п.
+
+
+def _autobuild_survey_items(db: Session, book) -> list[dict]:
+    """Собрать items минимального состава изысканий: строки книги по ключевым
+    словам, условный минимальный объём. Возвращает items для calculate_igi."""
+    from app.models import BookObjectType as _BOT, ReferenceRow as _RR
+    cat = _survey_category(book.code)
+
+    def _run(plan: list) -> list[dict]:
+        out: list[dict] = []
+        seen: set[int] = set()
+        for kws, wcat, vol in plan:
+            row = None
+            for kw in kws:
+                # Прицененная строка работы: цена может быть в «a» (рекогносцировка)
+                # ИЛИ в «b» (камеральная/бурение per-unit). СБЦ-1999 (a=b=0) не
+                # соберётся → в ручной ввод. Берём с наибольшей ценой (репрезентативная).
+                from sqlalchemy import func as _f
+                row = (db.query(_RR).outerjoin(_BOT, _RR.object_type_id == _BOT.id)
+                       .filter(_RR.book_version_id == book.id,
+                               (_f.coalesce(_RR.a, 0) != 0) | (_f.coalesce(_RR.b, 0) != 0))
+                       .filter((_RR.description.ilike(f"%{kw}%"))
+                               | (_BOT.name.ilike(f"%{kw}%")))
+                       .order_by((_f.coalesce(_RR.a, 0) + _f.coalesce(_RR.b, 0)).asc())
+                       .first())
+                if row:
+                    break
+            if row is None or row.id in seen:
+                continue
+            seen.add(row.id)
+            _ot = db.query(_BOT).filter(_BOT.id == row.object_type_id).first()
+            out.append({
+                "work_category": wcat, "a": float(row.a or 0), "b": float(row.b or 0),
+                "volume": vol, "k": 1.0, "table_num": row.table_num,
+                "row_num": row.row_num or "", "x_unit": row.x_unit or "",
+                "description": row.description or (_ot.name if _ot else ""),
+                "object_type_name": (_ot.name if _ot else ""), "auto": True,
+            })
+        return out
+
+    items = _run(_SURVEY_DEFAULTS.get(cat, []))
+    # комбинированные/нестандартные книги (напр. ИГИ-ИЭИ): состав не подобрался
+    # своими ключами → пробуем геологический (самый общий)
+    if not items and cat != "geology":
+        items = _run(_SURVEY_DEFAULTS["geology"])
+    return items
+
+
 # ── Форма 3П: госэкспертиза (Пост. Правительства РФ № 145, Приложение) ──────────
 # ТАБЛИЦА ПРОЦЕНТНОГО СООТНОШЕНИЯ П от суммы (Спд+Сиж) в ценах 2001 г. (млн руб).
 # Нац. стандарт (не per-book) — хранится константой. Формула п.56:
@@ -1248,12 +1334,28 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             if _bid in _manual_books:
                 continue  # пользователь уже завёл блок вручную
             _label = _survey_label(_blk["book_code"])
-            _names = ", ".join(_blk["names"][:4]) + ("…" if len(_blk["names"]) > 4 else "")
-            warnings.append(
-                f"Изыскания «{_label}» распознаны в ТЗ ({_names}) — раздел НЕ рассчитан "
-                f"автоматически: объёмы (пункты/площади/бурение) в ТЗ не заданы. "
-                f"Задайте их вручную в блоке «Изыскания» (справочник {_blk['book_code']})."
-            )
+            _book = db.query(ReferenceBook).filter(ReferenceBook.id == _bid).first()
+            # Автосборка минимального состава «по умолчанию» с условными объёмами
+            _items = _autobuild_survey_items(db, _book) if _book else []
+            if _items:
+                geological_surveys.append({
+                    "book_id": _bid, "book_code": _blk["book_code"],
+                    "complexity_category": 2, "k1": 1.0, "winter_pct": 0,
+                    "unfavorable_months": 0, "k2": 1.0, "items": _items,
+                    "auto": True, "label": _label,
+                })
+                warnings.append(
+                    f"Изыскания «{_label}» собраны АВТОМАТИЧЕСКИ по минимальному составу "
+                    f"с условными объёмами — цена ОРИЕНТИРОВОЧНАЯ. Уточните объёмы "
+                    f"(пункты/бурение/площади) во вкладке «Изыскания» / гейте финализации."
+                )
+            else:
+                _names = ", ".join(_blk["names"][:4]) + ("…" if len(_blk["names"]) > 4 else "")
+                warnings.append(
+                    f"Изыскания «{_label}» распознаны в ТЗ ({_names}) — раздел НЕ рассчитан "
+                    f"автоматически: не удалось подобрать состав в {_blk['book_code']}. "
+                    f"Задайте вручную в блоке «Изыскания»."
+                )
     if geological_surveys:
         from app.services.igi_calculator import calculate_igi
         igi_positions, igi_errors = calculate_igi(geological_surveys, db)
