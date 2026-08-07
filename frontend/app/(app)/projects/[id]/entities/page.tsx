@@ -78,7 +78,7 @@ export default function CalcWorkspacePage() {
   const [unitChecks, setUnitChecks] = useState<UnitCheckItem[]>([])
   const [overrides, setOverrides]   = useState<Record<number, EntityOverride>>({})
   const [dirty, setDirty]           = useState(false)
-  const [tab, setTab]               = useState<'objects' | 'basis'>('objects')
+  const [tab, setTab]               = useState<'objects' | 'surveys' | 'obsledovanie' | 'basis'>('objects')
   // варнинги, исчезнувшие после пересчёта — показываем зачёркнутыми
   const [resolvedWarnings, setResolvedWarnings] = useState<string[]>([])
 
@@ -376,6 +376,20 @@ export default function CalcWorkspacePage() {
   const obviousIdx   = entities.map((_, i) => i).filter(i => (entities[i].confidence ?? 1) >= 0.7)
   const suggestedIdx = entities.map((_, i) => i).filter(i => (entities[i].confidence ?? 1) < 0.7)
 
+  // Разбивка объектов по блокам 2ПС: изыскания / обследования / проектные
+  const entityBlock = (e: ExtractedEntity): 'survey' | 'obs' | 'design' => {
+    const t = `${e.object_type ?? ''} ${e.object_name ?? ''}`.toLowerCase()
+    if (t.includes('изыскан')) return 'survey'
+    if (t.includes('обследов') || t.includes('обмер')) return 'obs'
+    return 'design'
+  }
+  const allIdx = [...obviousIdx, ...suggestedIdx]
+  const surveyIdx = allIdx.filter(i => entityBlock(entities[i]) === 'survey')
+  const obsIdx    = allIdx.filter(i => entityBlock(entities[i]) === 'obs')
+  const visBlock  = tab === 'surveys' ? 'survey' : tab === 'obsledovanie' ? 'obs' : 'design'
+  const visObvious   = obviousIdx.filter(i => entityBlock(entities[i]) === visBlock)
+  const visSuggested = suggestedIdx.filter(i => entityBlock(entities[i]) === visBlock)
+
   // цена позиции: сумма строк расчёта (ПД+РД) с num = глоб.индекс + 1
   const costFor = (gi: number): number | null => {
     if (!calcResult) return null
@@ -399,7 +413,7 @@ export default function CalcWorkspacePage() {
 
   const extractPct = extractProgress.total > 0 ? Math.round((extractProgress.step / extractProgress.total) * 100) : 0
 
-  const tabBtn = (key: 'objects' | 'basis', label: string, badge?: number) => (
+  const tabBtn = (key: 'objects' | 'surveys' | 'obsledovanie' | 'basis', label: string, badge?: number) => (
     <button
       onClick={() => setTab(key)}
       style={{
@@ -538,14 +552,31 @@ export default function CalcWorkspacePage() {
             {/* Вкладки */}
             <div style={{ borderBottom: 'var(--hairline)', display: 'flex', gap: 4, overflowX: 'auto' }}>
               {tabBtn('objects', 'Объекты ПИР')}
+              {surveyIdx.length > 0 && tabBtn('surveys', 'Геологические изыскания', surveyIdx.length)}
+              {obsIdx.length > 0 && tabBtn('obsledovanie', 'Обследования', obsIdx.length)}
               {tabBtn('basis', 'Обоснование', basisCount)}
             </div>
 
-            {/* ═══ Вкладка «Объекты ПИР» ═══ */}
-            {tab === 'objects' && (
+            {/* ═══ Вкладки блоков: Объекты ПИР / Изыскания / Обследования ═══ */}
+            {(tab === 'objects' || tab === 'surveys' || tab === 'obsledovanie') && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {/* Стадии проектирования: определены AI из ТЗ, редактируются вручную */}
-                {!readOnly && (
+                {tab === 'surveys' && (
+                  <div style={{ fontSize: 12, color: 'var(--fg-3)', background: 'var(--bg-raised)',
+                    border: 'var(--hairline)', borderRadius: 'var(--radius-md)', padding: '10px 12px' }}>
+                    Изыскания собраны автоматически минимальным составом (ориентировочно).
+                    Реальные объёмы (пункты/бурение/площади) уточните в окне финализации
+                    или в блоке «Изыскания».
+                  </div>
+                )}
+                {tab === 'obsledovanie' && (
+                  <div style={{ fontSize: 12, color: 'var(--fg-3)', background: 'var(--bg-raised)',
+                    border: 'var(--hairline)', borderRadius: 'var(--radius-md)', padding: '10px 12px' }}>
+                    Обследования считаются от строительного объёма здания — задайте объём
+                    в окне финализации, иначе берётся условный минимум.
+                  </div>
+                )}
+                {/* Стадии проектирования: только на вкладке проектных объектов */}
+                {!readOnly && tab === 'objects' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Стадии:</span>
                     <div style={{ display: 'inline-flex', border: '1px solid var(--border-default)', borderRadius: 6, overflow: 'hidden' }}>
@@ -582,7 +613,7 @@ export default function CalcWorkspacePage() {
                 )}
 
                 {/* Основные позиции по этапам */}
-                {groupBySections(obviousIdx, entities).map(([sectionNum, { name, indices }]) => (
+                {groupBySections(visObvious, entities).map(([sectionNum, { name, indices }]) => (
                   <React.Fragment key={`s${sectionNum}`}>
                     {sectionNum > 0 && (
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--blue-300)', marginTop: 4 }}>
@@ -608,7 +639,7 @@ export default function CalcWorkspacePage() {
                 ))}
 
                 {/* Предложено AI */}
-                {suggestedIdx.length > 0 && (
+                {visSuggested.length > 0 && (
                   <>
                     <div style={{ marginTop: 4 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--warning-400)' }}>
@@ -618,7 +649,7 @@ export default function CalcWorkspacePage() {
                         Позиции нормативно обязательны, но прямо не указаны в ТЗ
                       </div>
                     </div>
-                    {suggestedIdx.map(gi => (
+                    {visSuggested.map(gi => (
                       <EntityCard
                         key={gi}
                         num={gi + 1}
