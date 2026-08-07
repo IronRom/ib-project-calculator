@@ -49,6 +49,17 @@ def _norm_section_code(code: str) -> str:
     return code.strip().upper().removeprefix("ИОС.").strip()
 
 
+_COUNT_UNITS = ("шт", "пункт", "место", "ячейк", "номер", "абонент", "камер",
+                "узел", "комплект", "устройств", "сервер", "арм", "точк",
+                "система", "скважин", "прибор", "комплекс", "ед.")
+
+
+def _is_count_unit(u: str) -> bool:
+    """Единица счётная (шт/пункт/узел/…) → X=1 по умолчанию законно. Мера
+    (м³/м²/га/м/тыс.м³ и т.п.) → нет: для расчёта нужен реальный объём."""
+    return any(k in (u or "").lower() for k in _COUNT_UNITS)
+
+
 # ── Форма 3П: госэкспертиза (Пост. Правительства РФ № 145, Приложение) ──────────
 # ТАБЛИЦА ПРОЦЕНТНОГО СООТНОШЕНИЯ П от суммы (Спд+Сиж) в ценах 2001 г. (млн руб).
 # Нац. стандарт (не per-book) — хранится константой. Формула п.56:
@@ -1212,9 +1223,12 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
                 "table_num":           table_num,
                 "row_num":             row_num,
                 "used_minimum":        match.used_minimum,
-                # условный X на ДИАПАЗОННОЙ таблице (не штучная) → нужен ввод объёма
-                "x_conditional":       match.used_minimum and not (
-                    row.x_min is None and row.x_max is None),
+                # нужен ввод объёма, если условный X на диапазонной таблице ИЛИ
+                # штучная строка с единицей-мерой (100 м³, тыс.м³, м², га…),
+                # где X=1 бессмысленно (обследование по строит. объёму и т.п.)
+                "x_conditional":       match.used_minimum and (
+                    not (row.x_min is None and row.x_max is None)
+                    or not _is_count_unit(row_unit)),
                 "object_name":         object_name,
                 "section_num":         entity.get("section_num", 0),
                 "section_name":        stage_label or entity.get("section_name", ""),
