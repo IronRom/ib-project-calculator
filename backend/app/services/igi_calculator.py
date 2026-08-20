@@ -41,9 +41,13 @@ def _auto_table_config(
                                        «при общей стоимости камеральных работ»,
                                        прим.2 — программа не учитывается)
 
-    Returns (table_num, (lo_row, hi_row) | None, base_mode) where base_mode is
-    'nonfield' | 'all' | 'kameral'; table_num is None when not configured
-    (auto-item skipped).
+    Дискриминатор колонки таблицы (когда один пункт даёт несколько цен —
+    напр. СБЦ-2001 табл.53: «обоснование предпроектной документации» и
+    «обоснование проекта (ТЭО)») хранится в row_range записи '<kind>_table'.
+
+    Returns (table_num, (lo_row, hi_row) | None, base_mode, disc) where
+    base_mode is 'nonfield' | 'all' | 'kameral'; table_num is None when not
+    configured (auto-item skipped).
     """
     rep = (
         db.query(BookCondition)
@@ -54,8 +58,9 @@ def _auto_table_config(
         .first()
     )
     if not rep or rep.coeff_min is None:
-        return None, None, "nonfield"
+        return None, None, "nonfield", ""
     table_num = int(rep.coeff_min)
+    disc = (rep.row_range or "").strip()
 
     cat = (
         db.query(BookCondition)
@@ -83,12 +88,12 @@ def _auto_table_config(
     )
     base_code = int(base_rec.coeff_min) if (base_rec and base_rec.coeff_min is not None) else 1
     base_mode = {2: "all", 3: "kameral"}.get(base_code, "nonfield")
-    return table_num, rng, base_mode
+    return table_num, rng, base_mode, disc
 
 
 def _report_config(db: Session, book_version_id: int, complexity_cat: int):
     """Back-compat wrapper: (table_num, cat_range) for the тех.отчёт table."""
-    table_num, rng, _ = _auto_table_config(db, book_version_id, "report", complexity_cat)
+    table_num, rng, _, _ = _auto_table_config(db, book_version_id, "report", complexity_cat)
     return table_num, rng
 
 _SURVEY_LABEL_MAP = [
@@ -167,6 +172,7 @@ def _get_k1_for_table(
 
 def _lookup_report_cost(
     db: Session, book_version_id: int, kameral_total_rub: float, complexity_cat: int,
+    pricing_method: str = "mu620",
 ) -> float:
     """Cost of the technical report from the book's report table.
 
@@ -181,17 +187,52 @@ def _lookup_report_cost(
     """
     kameral_thous = kameral_total_rub / 1000
 
-    report_table, cat_range, _ = _auto_table_config(db, book_version_id, "report", complexity_cat)
+    report_table, cat_range, _, disc = _auto_table_config(
+        db, book_version_id, "report", complexity_cat)
     if report_table is None:
         return 0.0
-    return _interpolate_cost_table(db, book_version_id, report_table, cat_range, kameral_thous)
+    return _interpolate_cost_table(db, book_version_id, report_table, cat_range,
+                                  kameral_thous, pricing_method, disc)
+
+
+_RE_BOUND_TO = re.compile(r"до\s+([\d\s.,]+)", re.IGNORECASE)
+_RE_BOUND_OVER = re.compile(r"св\.?\s*([\d\s.,]+)", re.IGNORECASE)
+
+
+def _bound_from_text(text: str) -> Optional[float]:
+    """Верхняя граница интервала из описания строки («Св. 2 до 5 тыс. руб.» → 5,
+    «Св. 20 тыс. руб.» → 20). Нужна для таблиц, где диапазон не разложен в
+    x_min/x_max (СБЦ-2001)."""
+    def _num(raw: str) -> Optional[float]:
+        cleaned = raw.replace(" ", "").replace("\u00a0", "").replace(",", ".").rstrip(".")
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    m = _RE_BOUND_TO.search(text)
+    if m:
+        return _num(m.group(1))
+    m = _RE_BOUND_OVER.search(text)
+    if m:
+        return _num(m.group(1))
+    return None
 
 
 def _interpolate_cost_table(
     db: Session, book_version_id: int, table_num: int,
-    cat_range, x_thous: float,
+    cat_range, x_thous: float, pricing_method: str = "mu620", disc: str = "",
 ) -> float:
-    """Linear interpolation over a cost table's reference points (руб)."""
+    """Интерполяция/экстраполяция по опорным точкам таблицы стоимости (руб).
+
+    Внутри интервала — линейная интерполяция (707/пр п.133 ф.8.6).
+    Вне интервала для книг 707/пр — ф.8.7 (ниже минимума) и ф.8.8 (выше
+    максимума): наклон крайнего сегмента × 0,6. Без этого техотчёт при малой
+    базе брался по цене первой строки таблицы и оказывался в разы дороже самих
+    работ (эталон Инфостроя ф.8.7 применяет: ЛС-02 «134 685 − (203 793−134 685)
+    /(50 000−20 000)×(20 000−17 255)×0,6»). Для не-707/пр книг (СБЦ-2001:
+    «показатели интервала применяются без интерполяции») крайняя точка
+    сохраняется как раньше.
+    """
     rows: list[ReferenceRow] = (
         db.query(ReferenceRow)
         .filter(
@@ -200,6 +241,11 @@ def _interpolate_cost_table(
         )
         .all()
     )
+    if disc:
+        narrowed = [r for r in rows if disc.lower() in (r.description or "").lower()]
+        if narrowed:
+            rows = narrowed
+
     if cat_range is not None:
         lo_p, hi_p = cat_range
         cat_rows = []
@@ -221,15 +267,32 @@ def _interpolate_cost_table(
             ref_points.append((float(r.x_max), float(r.b)))
         elif r.x_min is not None:
             ref_points.append((float(r.x_min), float(r.b)))
+        else:
+            # СБЦ-2001: границы интервала живут в описании («Св. 2 до 5 тыс. руб.»)
+            bound = _bound_from_text(r.description or "")
+            if bound is not None:
+                ref_points.append((bound, float(r.b or r.a or 0)))
 
     if not ref_points:
         return 0.0
 
     ref_points.sort(key=lambda p: p[0])
 
+    is_707 = (pricing_method or "mu620") == "707pr"
     if x_thous <= ref_points[0][0]:
+        if is_707 and len(ref_points) > 1:
+            (x1, b1), (x2, b2) = ref_points[0], ref_points[1]
+            if x2 != x1:
+                # ф.8.7: Ц = а1 − (а2−а1)/(Х2−Х1) × (Х1−Х) × 0,6
+                price = b1 - (b2 - b1) / (x2 - x1) * (x1 - x_thous) * 0.6
+                return max(price, 0.0)
         return ref_points[0][1]
     if x_thous >= ref_points[-1][0]:
+        if is_707 and len(ref_points) > 1:
+            (xp, bp), (xm, bm) = ref_points[-2], ref_points[-1]
+            if xm != xp:
+                # ф.8.8: Ц = амакс + (амакс−апред)/(Хмакс−Хпред) × (Х−Хмакс) × 0,6
+                return bm + (bm - bp) / (xm - xp) * (x_thous - xm) * 0.6
         return ref_points[-1][1]
 
     # Linear interpolation between adjacent reference points
@@ -320,6 +383,22 @@ def calculate_igi(
                     base_sum = cur_cost["field"] + cur_cost["percent"]
                 else:
                     base_sum = cur_cost.get(pbase, 0.0)
+                # Ступенчатая шкала (СБЦ-2001 табл.4/62/87): процент зависит от
+                # стоимости работ-базы в БАЗОВОМ уровне цен книги
+                scale = item.get("pct_scale")
+                if scale:
+                    base_ref = base_sum / index_val if index_val else base_sum
+                    for step in scale:
+                        if float(step["lo"]) <= base_ref < float(step["hi"]):
+                            pct = float(step["pct"])
+                            desc = step.get("label") or desc
+                            otype_name = step.get("label") or otype_name
+                            break
+                    else:
+                        last = scale[-1]
+                        pct = float(last["pct"])
+                        desc = last.get("label") or desc
+                        otype_name = last.get("label") or otype_name
                 cost = base_sum * pct / 100.0
                 counts_as = item.get("counts_as") or "percent"
                 cur_cost[counts_as] = cur_cost.get(counts_as, 0.0) + cost
@@ -434,7 +513,7 @@ def calculate_igi(
         # 'nonfield' — лаб+камеральные (НЗ-281 п.121, ИГФИ табл.52);
         # 'all' — полевые(×К1)+камеральные (ИГДИ табл.80/81, ИГФИ табл.53).
         for kind, label in (("report", "Технический отчёт"), ("program", "Программа изысканий")):
-            auto_table, cat_range, base_mode = _auto_table_config(
+            auto_table, cat_range, base_mode, disc = _auto_table_config(
                 db, book_version_id, kind, complexity_cat
             )
             if auto_table is None:
@@ -448,7 +527,8 @@ def calculate_igi(
             if base_x <= 0:
                 continue
             auto_cost_base = _interpolate_cost_table(
-                db, book_version_id, auto_table, cat_range, base_x / 1000
+                db, book_version_id, auto_table, cat_range, base_x / 1000,
+                getattr(book_rec, "pricing_method", "mu620") or "mu620", disc,
             )
             auto_cost = auto_cost_base * index_val
             if auto_cost <= 0:

@@ -119,11 +119,131 @@ _WORK_CAT_MARKERS = {
 _COEFF_ROW_MARKERS = ("коэффициент", "[коэф", "поправочн")
 
 
-def _autobuild_survey_items(db: Session, book) -> list[dict]:
+_ROMAN_CAT = {1: "I", 2: "II", 3: "III"}
+# Единицы-проценты: строка нормирует не рубли, а долю от других работ
+# (СБЦ-2001 табл.86 «% от стоимости лабораторных работ» и т.п.).
+_PERCENT_BASE_WORDS = (
+    ("лаборатор", "lab"), ("камерал", "kameral"), ("полев", "field"),
+)
+
+
+def _is_percent_unit(unit: str) -> bool:
+    return "%" in (unit or "")
+
+
+def _percent_base_from_text(*texts: str) -> str:
+    """База процентной строки по тексту единицы/типа («% от стоимости
+    лабораторных работ» → lab). По умолчанию — полевые."""
+    blob = " ".join(t or "" for t in texts).lower()
+    for word, base in _PERCENT_BASE_WORDS:
+        if word in blob:
+            return base
+    return "field"
+
+
+def _pick_survey_row(db: Session, book, table_num: int, row_num: str,
+                     work_cat: str, complexity_cat: int):
+    """Строка книги изысканий по (таблица, пункт) + вид работ + категория.
+
+    У НЗ пункт адресует строку однозначно; у СБЦ-2001 один пункт даёт до
+    шести строк — три категории сложности × полевые/камеральные, и они
+    различаются маркером «(полевые)»/«(камеральные)» в имени типа объекта
+    и «[II]» в описании. Фильтры применяются, только если сужают выбор.
+
+    row_num может нести явный дискриминатор через «|»: «п.4|полев» — когда
+    вид работ в смете не совпадает с маркером книги (лабораторная
+    спектрометрия лежит в таблице «полевые»).
+    """
+    from app.models import BookObjectType as _BOT, ReferenceRow as _RR
+    row_num, _, disc = row_num.partition("|")
+    row_num, disc = row_num.strip(), disc.strip().lower()
+    cands = (db.query(_RR, _BOT).outerjoin(_BOT, _RR.object_type_id == _BOT.id)
+             .filter(_RR.book_version_id == book.id,
+                     _RR.table_num == table_num,
+                     _RR.row_num == row_num)
+             .order_by(_RR.id).all())
+    if not cands:
+        return None, ""
+    if disc and len(cands) > 1:
+        narrowed = [c for c in cands
+                    if disc in ((c[1].name if c[1] else "") + " "
+                                + (c[0].description or "")).lower()]
+        if narrowed:
+            cands = narrowed
+    markers = () if disc else _WORK_CAT_MARKERS.get(work_cat, ())
+    if len(cands) > 1 and markers:
+        narrowed = [c for c in cands
+                    if any(m in ((c[1].name if c[1] else "").lower()) for m in markers)]
+        if narrowed:
+            cands = narrowed
+    if len(cands) > 1:
+        tag = f"[{_ROMAN_CAT.get(complexity_cat, 'II')}]"
+        narrowed = [c for c in cands if tag in (c[0].description or "")]
+        if narrowed:
+            cands = narrowed
+    row, ot = cands[0]
+    return row, (ot.name if ot else "")
+
+
+def _autoitems_from_conditions(db: Session, book, complexity_cat: int) -> list[dict]:
+    """Типовой состав изысканий, заданный ДАННЫМИ книги, а не эвристикой.
+
+    Конвенция book_conditions (посев — seed_survey_autoitems.py):
+        coeff_key  = 'autoitem_<work_category>'  (field | lab | kameral | program)
+        table_num  = номер таблицы книги
+        row_range  = номер строки («п.15»)
+        coeff_min  = объём по умолчанию (условный, правится во вкладке)
+        condition_short = как называть позицию в смете
+
+    Строка со «%»-единицей превращается в процентную позицию: её база
+    выводится из текста единицы («% от стоимости лабораторных работ» → lab).
+    """
+    from app.models import BookCondition as _BC
+    conds = (db.query(_BC)
+             .filter(_BC.book_version_id == book.id,
+                     _BC.coeff_key.ilike("autoitem_%"))
+             .order_by(_BC.id).all())
+    items: list[dict] = []
+    for c in conds:
+        work_cat = c.coeff_key.split("_", 1)[1]
+        if not c.table_num or not c.row_range:
+            continue
+        row, ot_name = _pick_survey_row(
+            db, book, int(c.table_num), c.row_range.strip(), work_cat, complexity_cat)
+        if row is None:
+            continue
+        vol = float(c.coeff_min) if c.coeff_min is not None else 1.0
+        if _is_percent_unit(row.x_unit):
+            items.append({
+                "work_category": "percent",
+                "pct": float(row.b or row.a or 0),
+                "percent_base": _percent_base_from_text(row.x_unit, ot_name, row.description),
+                "counts_as": work_cat if work_cat in ("field", "lab", "kameral") else "percent",
+                "table_num": row.table_num, "row_num": row.row_num or "",
+                "description": c.condition_short or row.description or "",
+                "object_type_name": c.condition_short or ot_name, "auto": True,
+            })
+            continue
+        items.append({
+            "work_category": work_cat, "a": float(row.a or 0), "b": float(row.b or 0),
+            "volume": vol, "k": 1.0, "table_num": row.table_num,
+            "row_num": row.row_num or "", "x_unit": row.x_unit or "",
+            "description": row.description or (c.condition_short or ""),
+            "object_type_name": c.condition_short or ot_name, "auto": True,
+        })
+    return items
+
+
+def _autobuild_survey_items(db: Session, book, complexity_cat: int = 2) -> list[dict]:
     """Собрать items минимального состава изысканий: строки книги по ключевым
     словам, условный минимальный объём. Возвращает items для calculate_igi."""
     from app.models import BookObjectType as _BOT, ReferenceRow as _RR
     cat = _survey_category(book.code)
+
+    # Типовой состав из данных книги — приоритетнее эвристики по словам
+    seeded = _autoitems_from_conditions(db, book, complexity_cat)
+    if seeded:
+        return seeded + _survey_surcharge_items(db, book)
 
     def _run(plan: list) -> list[dict]:
         out: list[dict] = []
@@ -163,7 +283,16 @@ def _autobuild_survey_items(db: Session, book) -> list[dict]:
                     break
             if row is None or row.id in seen:
                 continue
+            # строка нормирует процент, а не рубли — эвристикой её брать нельзя
+            if _is_percent_unit(row.x_unit):
+                continue
             seen.add(row.id)
+            # книга различает виды работ в имени типа — категория строки
+            # достовернее плана автосборки
+            for _m_cat, _marks in _WORK_CAT_MARKERS.items():
+                if any(m in _ot_name.lower() for m in _marks):
+                    wcat = _m_cat
+                    break
             out.append({
                 "work_category": wcat, "a": float(row.a or 0), "b": float(row.b or 0),
                 "volume": vol, "k": 1.0, "table_num": row.table_num,
@@ -189,7 +318,12 @@ def _survey_surcharge_items(db: Session, book) -> list[dict]:
     Конвенция (универсальная, per книга):
       coeff_key = 'surcharge_<slug>'  → coeff_min = процент (напр. 13.2)
       row_range = база начисления: 'field' | 'lab' | 'kameral' | 'field+percent'
-                  (пусто → 'field')
+                  (пусто → 'field'); опционально со ступенью шкалы:
+                  '<база>:<от>-<до>' — пороги в РУБЛЯХ базового уровня цен
+                  книги («kameral:0-500»). Несколько записей с одним coeff_key
+                  = ступени одной таблицы (СБЦ-2001 табл.4/62/87: процент
+                  зависит от стоимости работ), выбор ступени — в igi_calculator
+                  по фактической базе.
       condition_short = наименование позиции в смете
       coeff_max      = номер таблицы книги (для обоснования), необязательно
 
@@ -203,21 +337,61 @@ def _survey_surcharge_items(db: Session, book) -> list[dict]:
                     _BC.coeff_min.isnot(None))
             .order_by(_BC.id)
             .all())
-    items: list[dict] = []
+    grouped: dict[str, list] = {}
     for r in rows:
-        base = (r.row_range or "field").strip() or "field"
-        items.append({
+        grouped.setdefault(r.coeff_key, []).append(r)
+
+    items: list[dict] = []
+    for key, recs in grouped.items():
+        first = recs[0]
+        base_spec = (first.row_range or "field").strip() or "field"
+        base = base_spec.split(":", 1)[0] or "field"
+        item = {
             "work_category": "percent",
-            "pct": float(r.coeff_min),
+            "pct": float(first.coeff_min),
             "percent_base": base,
             "counts_as": "percent",
-            "table_num": int(r.coeff_max) if r.coeff_max is not None else (r.table_num or 0),
+            "table_num": int(first.coeff_max) if first.coeff_max is not None
+                         else (first.table_num or 0),
             "row_num": "",
-            "description": r.condition_short,
-            "object_type_name": r.condition_short,
+            "description": first.condition_short,
+            "object_type_name": first.condition_short,
             "auto": True,
-        })
+        }
+        if len(recs) > 1 or ":" in base_spec:
+            scale = []
+            for r in recs:
+                spec = (r.row_range or "").strip()
+                rng = spec.split(":", 1)[1] if ":" in spec else ""
+                lo_s, _, hi_s = rng.partition("-")
+                lo = float(lo_s) if lo_s.strip() else 0.0
+                hi = float(hi_s) if hi_s.strip() else float("inf")
+                scale.append({"lo": lo, "hi": hi, "pct": float(r.coeff_min),
+                              "label": r.condition_short})
+            scale.sort(key=lambda s: s["lo"])
+            item["pct_scale"] = scale
+            item["pct"] = scale[0]["pct"]
+            item["description"] = scale[0]["label"]
+            item["object_type_name"] = scale[0]["label"]
+        items.append(item)
     return items
+
+
+def _autoblock_params(db: Session, book) -> dict[str, float]:
+    """Параметры блока изысканий по умолчанию — из данных книги.
+
+    Конвенция book_conditions: coeff_key='autoblock_<param>', coeff_min=значение,
+    где param ∈ {winter_pct, unfavorable_months, k1, k2, complexity_category}.
+    Пример: СБЦ-2001 табл.2 общих указаний — полевые работы в неблагоприятный
+    период 6–7,5 мес идут с К=1,3, то есть winter_pct=0,3.
+    """
+    from app.models import BookCondition as _BC
+    rows = (db.query(_BC)
+            .filter(_BC.book_version_id == book.id,
+                    _BC.coeff_key.ilike("autoblock_%"),
+                    _BC.coeff_min.isnot(None))
+            .all())
+    return {r.coeff_key.split("_", 1)[1]: float(r.coeff_min) for r in rows}
 
 
 def _pick_survey_book(db: Session, cat: str, allow_regional: bool):
@@ -1591,13 +1765,18 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             _label = _survey_label(_blk["book_code"])
             _book = db.query(ReferenceBook).filter(ReferenceBook.id == _bid).first()
             # Автосборка минимального состава «по умолчанию» с условными объёмами
-            _items = _autobuild_survey_items(db, _book) if _book else []
+            _params = _autoblock_params(db, _book) if _book else {}
+            _cat = int(_params.get("complexity_category", 2))
+            _items = _autobuild_survey_items(db, _book, _cat) if _book else []
             if _items:
                 geological_surveys.append({
                     "book_id": _bid, "book_code": _blk["book_code"],
-                    "complexity_category": 2, "k1": 1.0, "winter_pct": 0,
-                    "unfavorable_months": 0, "k2": 1.0, "items": _items,
-                    "auto": True, "label": _label,
+                    "complexity_category": _cat,
+                    "k1": float(_params.get("k1", 1.0)),
+                    "winter_pct": float(_params.get("winter_pct", 0)),
+                    "unfavorable_months": float(_params.get("unfavorable_months", 0)),
+                    "k2": float(_params.get("k2", 1.0)),
+                    "items": _items, "auto": True, "label": _label,
                 })
                 warnings.append(
                     f"Изыскания «{_label}» собраны АВТОМАТИЧЕСКИ по минимальному составу "

@@ -673,3 +673,109 @@ def test_tz_flags_deterministic():
     assert r2.surveys_scope == "listed"      # виды перечислены явно
     assert not r2.expertise_required
     assert r2.funding_source == "moscow_city"
+
+
+# ── Изыскания: типовой состав из данных книги, шкалы, ф.8.7 ────────────────────
+
+def _survey_block(db, book_code: str):
+    """Автособранный блок изысканий книги (как его строит calculate)."""
+    from app.models import ReferenceBook
+    from app.services.calculator import _autoblock_params, _autobuild_survey_items
+    from app.services.igi_calculator import calculate_igi
+    bk = db.query(ReferenceBook).filter(ReferenceBook.code == book_code).first()
+    assert bk, f"книга {book_code} не найдена"
+    params = _autoblock_params(db, bk)
+    cat = int(params.get("complexity_category", 2))
+    items = _autobuild_survey_items(db, bk, cat)
+    pos, err = calculate_igi([{
+        "book_id": bk.id, "book_code": bk.code, "complexity_category": cat,
+        "k1": float(params.get("k1", 1.0)), "k2": float(params.get("k2", 1.0)),
+        "winter_pct": float(params.get("winter_pct", 0)),
+        "unfavorable_months": float(params.get("unfavorable_months", 0)),
+        "items": items,
+    }], db)
+    assert not err, err
+    return pos
+
+
+def test_survey_composition_from_book_data(db):
+    """[Рейсовая ЛС-01] Типовой состав геодезии посеян в book_conditions
+    (autoitem_*), а не угадывается по словам: камеральная обработка плановой
+    сети 1714×3×1,25 = 6 428 руб и нивелирной 4771×3×1,25 = 17 891 руб —
+    копейка в копейку с эталоном."""
+    pos = _survey_block(db, "НЗ-2024-МС812-ИГДИ")
+    costs = [round(p["cost"], 0) for p in pos]
+    assert 6_428 in costs, costs
+    assert 17_891 in costs, costs
+    # состав больше не тянет «незастроенную территорию 1:5000» за 100 руб/га
+    assert not any("1:5000" in (p.get("row_description") or "") for p in pos), pos
+
+
+def test_survey_winter_factor_from_book_data(db):
+    """[СБЦ-2001 табл.2 общих указаний] Полевые работы в неблагоприятный период
+    6–7,5 мес идут с К=1,3 (autoblock_winter_pct=0,3): рекогносцировка экологии
+    27×1,3×80,58 = 2 828 руб и радон 535×2×1,3×80,58 = 112 087 — как в ЛС-04."""
+    pos = _survey_block(db, "СБЦ-2001-ИГИ-ИЭИ")
+    costs = [round(p["cost"], 0) for p in pos]
+    assert 2_828 in costs, costs
+    assert 112_087 in costs, costs
+
+
+def test_survey_percent_row_not_charged_as_rubles(db):
+    """[СБЦ-2001 табл.86] Строка с единицей «% от стоимости лабораторных работ»
+    становится процентной позицией от лабораторных, а не рублёвой ставкой."""
+    pos = _survey_block(db, "СБЦ-2001-ИГИ-ИЭИ")
+    lab = sum(p["cost"] for p in pos if p["work_category"] == "lab")
+    pct_rows = [p for p in pos if p["work_category"] == "percent"
+                and "лабораторн" in (p["name"] or "").lower()]
+    assert len(pct_rows) == 1, [p["name"] for p in pos]
+    assert math.isclose(pct_rows[0]["cost"], lab * float(pct_rows[0]["quantity"]) / 100,
+                        rel_tol=1e-6)
+
+
+def test_survey_surcharge_scale_follows_base(db):
+    """[НЗ-812 п.28 табл.3] Процент внешнего транспорта — шкала от стоимости
+    полевых: до 250 тыс.руб — 13,2 %, свыше — 10,4 % (константа занижала бы
+    смету при вводе реальных объёмов)."""
+    from app.models import ReferenceBook
+    from app.services.calculator import _survey_surcharge_items
+    from app.services.igi_calculator import calculate_igi
+    bk = db.query(ReferenceBook).filter(
+        ReferenceBook.code == "НЗ-2024-МС812-ИГДИ").first()
+    surch = _survey_surcharge_items(db, bk)
+    transport = next(i for i in surch if "внешний транспорт" in i["description"])
+    assert transport.get("pct_scale"), transport
+
+    def _pct_for(field_base_rub):
+        items = [{"work_category": "field", "a": field_base_rub, "b": 0, "volume": 1,
+                  "k": 1.0, "table_num": 7, "row_num": "п.1", "x_unit": "1 пункт",
+                  "description": "полевые"}, transport]
+        pos, err = calculate_igi([{"book_id": bk.id, "book_code": bk.code,
+                                   "complexity_category": 2, "k1": 1.0, "k2": 1.0,
+                                   "winter_pct": 0, "unfavorable_months": 0,
+                                   "items": items}], db)
+        assert not err, err
+        return next(p["quantity"] for p in pos if p["work_category"] == "percent")
+
+    assert _pct_for(100_000) == 13.2
+    assert _pct_for(400_000) == 10.4
+    assert _pct_for(2_000_000) == 6.7
+
+
+def test_report_table_extrapolates_down_707pr(db):
+    """[707/пр п.133 ф.8.7] Ниже первой опорной точки таблицы отчёта цена
+    снижается наклоном крайнего сегмента ×0,6, а не берётся «по первой строке»
+    (эталон ЛС-02 считает так же). Для книг не по 707/пр поведение прежнее."""
+    from app.models import ReferenceBook
+    from app.services.igi_calculator import _interpolate_cost_table
+    bk = db.query(ReferenceBook).filter(
+        ReferenceBook.code == "НЗ-2025-МС281-ИГИ").first()
+    first_point = _interpolate_cost_table(db, bk.id, 65, (8, 15), 20.0, "707pr")
+    tiny = _interpolate_cost_table(db, bk.id, 65, (8, 15), 0.2, "707pr")
+    flat = _interpolate_cost_table(db, bk.id, 65, (8, 15), 0.2, "mu620")
+    assert tiny < first_point, (tiny, first_point)
+    assert math.isclose(flat, first_point, rel_tol=1e-9)
+    # ф.8.7 буквально: а1 − (а2−а1)/(Х2−Х1)×(Х1−Х)×0,6
+    a1, a2 = 134_685.0, 203_793.0
+    expected = a1 - (a2 - a1) / (50 - 20) * (20 - 0.2) * 0.6
+    assert math.isclose(tiny, expected, rel_tol=1e-6), (tiny, expected)
