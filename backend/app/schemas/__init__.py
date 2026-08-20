@@ -130,6 +130,11 @@ class ExtractionResult(BaseModel):
     tz_object_name: str = ""   # formal object name from TZ header, e.g. «Система управления...»
     missing_data: list[str] = []
     overall_confidence: float = 0.0
+    # Детерминированные признаки ТЗ (проставляются кодом, не AI) — см.
+    # entity_extractor._apply_tz_flags
+    expertise_required: bool = False   # ПД подлежит госэкспертизе → форма 3П
+    surveys_scope: str = ""            # 'all' (без перечня видов) | 'listed' | ''
+    funding_source: str = ""           # federal | private | moscow_city
 
 
 class CalculationOut(BaseModel):

@@ -517,3 +517,159 @@ def test_expertise_form3p_pge_table(db):
     assert _pge_percent(500_001) == 20.22        # более 0,5
     assert _pge_percent(5_000_000) == 8.77       # более 4
     assert _pge_percent(250_000_000) == 0.58     # более 220
+
+
+# ── Гарды состава сметы (сессия 20.08.2026, разбор Рейсовой против эталона) ────
+
+def _asutp_entity(**kw):
+    """АСУТП без количественных данных ТЗ (факторы назначены AI)."""
+    base = dict(
+        object_name="АСУ ТП", category="reconstruction",
+        sbts_code="СБЦП 81-2001-22", sbts_table=None,
+        x_value=None, x_unit="",
+        x_value_missing_reason="перечень функций автоматизации в ТЗ отсутствует",
+        asutp_factors={"Ф2": "п.1.1", "Ф5": "п.2.1", "Ф10": "п.7.1"},
+    )
+    base.update(kw)
+    return _ent(**base)
+
+
+def test_asutp_without_data_not_doubled(db):
+    """[Рейсовая] АСУТП без данных ТЗ + объект автоматизации → отдельная позиция
+    по СБЦП-22 НЕ создаётся (автоматизация объекта входит в цену его
+    проектирования; эталон Инфостроя такой позиции не содержит), warning есть."""
+    b, ot = _book_type_by_a(db, "НЗ-2021-МС828-ИТСО", 33, 105.2)
+    r = calculate({"stage": "П+Р", "entities": [
+        _ent(object_name="СОТВ", category="reconstruction",
+             sbts_code="НЗ-2021-МС828-ИТСО", sbts_table=33,
+             sbts_object_type_id=ot.id, x_value=12, x_unit="шт."),
+        _asutp_entity(),
+    ]}, db)
+    assert not any(p["book_code"] == "СБЦП 81-2001-22" for p in r["positions"])
+    assert any("НЕ включена" in w and "АСУ ТП" in w for w in r["warnings"]), r["warnings"]
+
+
+def test_asutp_alone_still_calculated(db):
+    """АСУТП — единственный предмет расчёта: позиция считается (по минимальным
+    факторам), иначе смета осталась бы пустой."""
+    r = calculate({"stage": "П", "entities": [_asutp_entity()]}, db)
+    assert [p for p in r["positions"] if p["book_code"] == "СБЦП 81-2001-22"], r["errors"]
+
+
+def test_component_position_not_doubled(db):
+    """[Рейсовая] ИТП и узел учёта тепла — одна таблица НЗ-847 т.3.08 и один и
+    тот же X=0,184 Гкал/ч: узел учёта учтён в цене ИТП (эталон ЛС-06/07 даёт
+    одну позицию) → вторая позиция в смету не идёт, но объясняется warning'ом."""
+    r = calculate({"stage": "П", "entities": [
+        _ent(object_name="ИТП", category="reconstruction",
+             sbts_code="НЗ-2021-МС847-СИТО", sbts_table=308,
+             x_value=0.184, x_unit="Гкал/ч"),
+        _ent(object_name="УУТЭ", category="reconstruction",
+             sbts_code="НЗ-2021-МС847-СИТО", sbts_table=308,
+             x_value=0.184, x_unit="Гкал/ч"),
+    ]}, db)
+    names = {p["name"] for p in r["positions"]}
+    assert "ИТП" in names and "УУТЭ" not in names, names
+    assert any("УУТЭ" in w and "составные элементы" in w for w in r["warnings"])
+
+
+def test_unresolved_book_is_explained(db):
+    """Экстрактор не определил справочник (пустой sbts_code) → внятная ошибка
+    «требует уточнения», а не «активный справочник «» не найден»."""
+    r = calculate({"stage": "П", "entities": [
+        _ent(object_name="АПС и СОУЭ", sbts_code="", sbts_table=None)]}, db)
+    assert r["errors"] and "требует уточнения" in r["errors"][0], r["errors"]
+    assert "«»" not in r["errors"][0]
+
+
+def test_expertise_flag_adds_form3p(db):
+    """ТЗ говорит «ПД подлежит государственной экспертизе» (флаг
+    expertise_required от экстрактора) → блок экспертизы по форме 3П в смете."""
+    b, ot = _book_type_by_a(db, "НЗ-2021-МС828-ИТСО", 33, 105.2)
+    ents = [_ent(object_name="СОТВ", category="reconstruction",
+                 sbts_code="НЗ-2021-МС828-ИТСО", sbts_table=33,
+                 sbts_object_type_id=ot.id, x_value=12, x_unit="шт.")]
+    r_off = calculate({"stage": "П+Р", "entities": list(ents)}, db)
+    r_on = calculate({"stage": "П+Р", "entities": list(ents),
+                      "expertise_required": True}, db)
+    assert not any(p.get("block_kind") == "expertise" for p in r_off["positions"])
+    exp = [p for p in r_on["positions"] if p.get("block_kind") == "expertise"]
+    assert len(exp) == 1 and exp[0]["cost"] > 0, r_on["positions"]
+
+
+def test_obsledovanie_preddogovor_10pct(db):
+    """[СБЦП-25 гл.2.1/2.5] Преддоговорные работы 10% от стоимости обследований
+    добавляются автоматически (эталон ЛС-05 пп.2,4,9)."""
+    r = calculate({"stage": "П+Р", "entities": [
+        _ent(object_name="Обследование конструкций", category="reconstruction",
+             sbts_code="СБЦП 81-2001-25", sbts_table=4, x_value=None,
+             x_unit="100 м³ строительного объёма")]}, db)
+    pd = [p for p in r["positions"] if p["name"] == "Преддоговорные работы"]
+    others = [p for p in r["positions"] if p["name"] != "Преддоговорные работы"]
+    assert len(pd) == 1, r["positions"]
+    assert math.isclose(pd[0]["cost"], sum(p["cost"] for p in others) * 0.10, abs_tol=0.01)
+
+
+def test_survey_surcharges_from_conditions(db):
+    """[НЗ-812 п.28 табл.3 / п.19 табл.2] Надбавки изысканий — данные книги:
+    ДЗвнеш 13,2% и ДЗнп 29% от полевых (эталон ЛС-01: 385 043×13,2% = 50 826,
+    ×29% = 111 662)."""
+    from app.models import ReferenceBook
+    from app.services.calculator import _survey_surcharge_items
+    from app.services.igi_calculator import calculate_igi
+    bk = (db.query(ReferenceBook)
+          .filter(ReferenceBook.code == "НЗ-2024-МС812-ИГДИ").first())
+    surch = {round(float(i["pct"]), 2) for i in _survey_surcharge_items(db, bk)}
+    assert {13.2, 29.0} <= surch, surch
+    items = [{"work_category": "field", "a": 100000, "b": 0, "volume": 1, "k": 1.0,
+              "table_num": 7, "row_num": "п.1", "x_unit": "1 пункт",
+              "description": "полевые"}]
+    items += _survey_surcharge_items(db, bk)
+    pos, err = calculate_igi([{"book_id": bk.id, "book_code": bk.code,
+                               "complexity_category": 2, "k1": 1.0, "k2": 1.0,
+                               "winter_pct": 0, "unfavorable_months": 0,
+                               "items": items}], db)
+    assert not err, err
+    field_cost = next(p["cost"] for p in pos if p["work_category"] == "field")
+    pcts = {round(p["quantity"], 2): p["cost"] for p in pos
+            if p["work_category"] == "percent"}
+    assert math.isclose(pcts[13.2], field_cost * 0.132, rel_tol=1e-6)
+    assert math.isclose(pcts[29.0], field_cost * 0.29, rel_tol=1e-6)
+
+
+def test_surveys_scope_all_adds_missing_kinds(db):
+    """ТЗ «выполнить необходимые инженерные изыскания» без перечня видов
+    (surveys_scope='all') → добираются недостающие виды (гидрометеорология,
+    экология) активными федеральными книгами; МРР для федерального заказа
+    не подключаются."""
+    b, ot = _book_type_by_a(db, "НЗ-2021-МС828-ИТСО", 33, 105.2)
+    r = calculate({"stage": "П+Р", "surveys_scope": "all",
+                   "funding_source": "federal", "entities": [
+                       _ent(object_name="СОТВ", category="reconstruction",
+                            sbts_code="НЗ-2021-МС828-ИТСО", sbts_table=33,
+                            sbts_object_type_id=ot.id, x_value=12, x_unit="шт.")]}, db)
+    books = {p["book_code"] for p in r["positions"] if p.get("work_category")}
+    assert any("ГИДРОМЕТ" in b for b in books), books
+    assert any("ИЭИ" in b for b in books), books
+    assert not any("МРР" in b for b in books), books
+
+
+def test_tz_flags_deterministic():
+    """Признаки ТЗ ставит код, не AI: госэкспертиза, полный состав изысканий,
+    источник финансирования (ТЗ «Рейсовая»: ФГБУ → federal, без МРР)."""
+    from app.schemas import ExtractionResult
+    from app.services.entity_extractor import _apply_tz_flags
+    r = ExtractionResult(entities=[])
+    _apply_tz_flags(r, "Заказчик ФГБУ «СЛО «Россия». Необходимые инженерные "
+                       "изыскания (в т.ч. обследования). Проектная документация "
+                       "подлежит прохождению государственной экспертизы.")
+    assert r.expertise_required and r.surveys_scope == "all"
+    assert r.funding_source == "federal"
+
+    r2 = ExtractionResult(entities=[])
+    _apply_tz_flags(r2, "Выполнить инженерно-геодезические и инженерно-геологические "
+                        "изыскания. Финансирование — бюджет города Москвы, "
+                        "Департамент строительства города Москвы.")
+    assert r2.surveys_scope == "listed"      # виды перечислены явно
+    assert not r2.expertise_required
+    assert r2.funding_source == "moscow_city"

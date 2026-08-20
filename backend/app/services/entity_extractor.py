@@ -23,6 +23,44 @@ _STRIP_RANGE_SUFFIX = re.compile(
 
 # ── Context builders ──────────────────────────────────────────────────────────
 
+_RE_EXPERTISE = re.compile(
+    r"(государственн\w*\s+экспертиз|негосударственн\w*\s+экспертиз|"
+    r"экспертиз\w*\s+проектн\w*\s+документаци|достоверност\w*\s+определени\w*\s+сметной|"
+    r"достоверност\w*\s+сметной\s+стоимост)",
+    re.IGNORECASE,
+)
+# «Выполнить необходимые инженерные изыскания» — общая формулировка без
+# перечня видов: считаем полный состав по СП 47.13330 (все основные виды).
+_RE_SURVEYS_ALL = re.compile(
+    r"(необходим\w*\s+(инженерн\w*\s+)?изыскани|"
+    r"весь\s+комплекс\s+(инженерн\w*\s+)?изыскани|"
+    r"инженерн\w*\s+изыскани\w*\s+в\s+полном\s+объ[её]м|"
+    r"комплекс\w*\s+инженерн\w*\s+изыскани)",
+    re.IGNORECASE,
+)
+_SURVEY_KIND_WORDS = (
+    "инженерно-геодезическ", "инженерно-геологическ",
+    "инженерно-гидрометеорологическ", "инженерно-экологическ",
+)
+
+
+def _apply_tz_flags(result: "ExtractionResult", tz_text: str) -> None:
+    """Детерминированные признаки ТЗ (без AI) — влияют на состав сметы.
+
+    expertise_required — ПД подлежит госэкспертизе (форма 3П, Пост. 145);
+    surveys_scope='all' — ТЗ требует изыскания без перечня видов;
+    funding_source — источник финансирования (выбор нормативной базы).
+    """
+    t = tz_text or ""
+    result.expertise_required = bool(_RE_EXPERTISE.search(t))
+    kinds_listed = sum(1 for w in _SURVEY_KIND_WORDS if w in t.lower())
+    if _RE_SURVEYS_ALL.search(t) and kinds_listed < 2:
+        result.surveys_scope = "all"
+    elif kinds_listed:
+        result.surveys_scope = "listed"
+    result.funding_source = _detect_funding(t)
+
+
 def _detect_funding(tz_text: str) -> str:
     """Источник финансирования объекта (на всё ТЗ) — определяет нормативную базу.
 
@@ -1098,6 +1136,18 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
 
 async def extract_entities_openrouter(text: str, model_id: str, db=None,
                                        progress_cb=None) -> ExtractionResult:
+    """Three-pass extraction via OpenRouter (OpenAI-compatible multi-turn).
+
+    Обёртка: проставляет детерминированные флаги ТЗ (экспертиза, состав
+    изысканий, финансирование) поверх любого пути возврата impl-функции.
+    """
+    result = await _extract_entities_openrouter_impl(text, model_id, db, progress_cb)
+    _apply_tz_flags(result, text[: settings.max_tz_chars])
+    return result
+
+
+async def _extract_entities_openrouter_impl(text: str, model_id: str, db=None,
+                                            progress_cb=None) -> ExtractionResult:
     """Three-pass extraction via OpenRouter (OpenAI-compatible multi-turn).
 
     progress_cb(message) — опциональный колбэк на границах проходов,
