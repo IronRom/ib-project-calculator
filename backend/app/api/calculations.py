@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, require_calculate
 from app.api.utils import sse as _sse
 from app.database import get_db
-from app.models import Calculation, Project, User
+from app.models import Calculation, Project, ProjectFile, User
 from app.schemas import CalculationOut, GeologicalSurvey as GeologicalSurveySchema
 from app.services.document_parser import parse_project_files
 from app.services.entity_extractor import extract_entities
@@ -290,6 +290,7 @@ def compute_calculation(
     if not calc.extracted_entities:
         raise HTTPException(status_code=422, detail="Сначала запустите извлечение сущностей")
     _ensure_draft(calc)
+    _backfill_tz_flags(calc, db)
     result = calculate(calc.extracted_entities, db)
     calc.price_index_id = result.pop("_price_index_id", None)
     calc.calculation_result = result
@@ -754,6 +755,32 @@ def _get_own_project(project_id: int, user_id: int, db: Session) -> Project:
     return project
 
 
+def _backfill_tz_flags(calc, db: Session) -> None:
+    """Достроить детерминированные признаки ТЗ у расчётов старых версий.
+
+    expertise_required / surveys_scope / funding_source появились позже —
+    у расчётов, извлечённых до этого, их нет, и «Пересчитать» молча теряло
+    госэкспертизу и недостающие виды изысканий. Флаги считаются по тексту ТЗ
+    проекта (без AI), поэтому бэкфилл дёшев и детерминирован.
+    """
+    ee = calc.extracted_entities
+    if not ee or "expertise_required" in ee:
+        return
+    texts = [f.extracted_text for f in
+             db.query(ProjectFile).filter(ProjectFile.project_id == calc.project_id).all()
+             if f.extracted_text]
+    if not texts:
+        return
+    from app.schemas import ExtractionResult
+    from app.services.entity_extractor import _apply_tz_flags
+    probe = ExtractionResult(entities=[])
+    _apply_tz_flags(probe, "\n".join(texts))
+    ee["expertise_required"] = probe.expertise_required
+    ee["surveys_scope"] = probe.surveys_scope
+    ee["funding_source"] = probe.funding_source
+    flag_modified(calc, "extracted_entities")
+
+
 # ═══ Жизненный цикл расчёта: версии, уточнения, финализация ═══════════════
 # Модель: цепочка версий (parent_id). Черновик (draft) редактируем;
 # финал (final) заморожен навсегда, к нему привязаны файлы 2ПС/КП.
@@ -969,6 +996,7 @@ def finalize_calculation(
 
     project, calc = _get_calc(project_id, calc_id, current_user.id, db)
     _ensure_draft(calc)
+    _backfill_tz_flags(calc, db)
     ee = calc.extracted_entities or {}
     if not (ee.get("entities") or ee.get("geological_surveys")):
         raise HTTPException(status_code=422, detail="Нечего финализировать")

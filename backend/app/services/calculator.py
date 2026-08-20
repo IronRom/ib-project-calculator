@@ -66,6 +66,7 @@ def _is_count_unit(u: str) -> bool:
 # автоматически (report_table/program_table). Реальные объёмы — в гейте/вкладке.
 _SURVEY_DEFAULTS: dict[str, list[tuple[list[str], str, float]]] = {
     "geodesy": [
+        (["опорной геодезическ", "опорн", "пункт"], "field", 1.0),
         (["топографическ", "инженерно-топографическ", "тахеометрическ"], "field", 1.0),
         (["камеральн"], "kameral", 1.0),
     ],
@@ -77,14 +78,17 @@ _SURVEY_DEFAULTS: dict[str, list[tuple[list[str], str, float]]] = {
         (["камеральн"], "kameral", 1.0),
     ],
     "ecology": [
-        (["маршрутн", "рекогносциров"], "field", 1.0),
-        (["отбор проб", "проб почв", "проб воды"], "field", 1.0),
-        (["химическ", "содержания", "загрязн"], "lab", 1.0),
+        (["маршрутн", "наблюдени при передвижении", "рекогносциров"], "field", 1.0),
+        (["отбор точечных проб", "отбор проб", "проб почв", "проб воды"], "field", 1.0),
+        (["радиацион"], "field", 1.0),
+        (["химическ", "спектрометри", "загрязн", "содержания"], "lab", 1.0),
         (["камеральн"], "kameral", 1.0),
     ],
     "hydromet": [
         (["рекогносциров"], "field", 1.0),
-        (["камеральн", "характеристик", "климатическ"], "kameral", 1.0),
+        (["скорост", "течени", "расход воды"], "field", 1.0),
+        (["климатическ"], "kameral", 1.0),
+        (["камеральн", "характеристик"], "kameral", 1.0),
     ],
 }
 
@@ -93,11 +97,26 @@ def _survey_category(book_code: str) -> str:
     c = (book_code or "").lower()
     if "812" in c or "игди" in c or "геодез" in c:
         return "geodesy"
-    if "экол" in c or "иэи" in c or "гидромет" in c and "экол" in c:
-        return "ecology"
     if "гидромет" in c or "игми" in c:
         return "hydromet"
+    # комбинированные ИГИ-ИЭИ используем как экологические: геология покрыта
+    # отдельной книгой НЗ
+    if "экол" in c or "иэи" in c:
+        return "ecology"
     return "geology"  # дефолт: ИГИ/281/МРР-3.2 и т.п.
+
+
+# Маркеры вида работ в имени типа объекта (СБЦ-1999: одна строка таблицы даёт
+# две цены — «(полевые)» и «(камеральные)»). Без фильтра камеральная работа
+# может попасть в полевые и наоборот.
+_WORK_CAT_MARKERS = {
+    "field":   ("полев",),
+    "kameral": ("камерал",),
+    "lab":     ("лаборатор",),
+}
+# Строки-коэффициенты (табл. общих положений СБЦ-1999: районные коэффициенты,
+# неблагоприятный период и т.п.) — это НЕ работы, в состав изысканий не идут.
+_COEFF_ROW_MARKERS = ("коэффициент", "[коэф", "поправочн")
 
 
 def _autobuild_survey_items(db: Session, book) -> list[dict]:
@@ -111,30 +130,46 @@ def _autobuild_survey_items(db: Session, book) -> list[dict]:
         seen: set[int] = set()
         for kws, wcat, vol in plan:
             row = None
+            _ot_name = ""
             for kw in kws:
                 # Прицененная строка работы: цена может быть в «a» (рекогносцировка)
                 # ИЛИ в «b» (камеральная/бурение per-unit). СБЦ-1999 (a=b=0) не
                 # соберётся → в ручной ввод. Берём с наибольшей ценой (репрезентативная).
                 from sqlalchemy import func as _f
-                row = (db.query(_RR).outerjoin(_BOT, _RR.object_type_id == _BOT.id)
-                       .filter(_RR.book_version_id == book.id,
-                               (_f.coalesce(_RR.a, 0) != 0) | (_f.coalesce(_RR.b, 0) != 0))
-                       .filter((_RR.description.ilike(f"%{kw}%"))
-                               | (_BOT.name.ilike(f"%{kw}%")))
-                       .order_by((_f.coalesce(_RR.a, 0) + _f.coalesce(_RR.b, 0)).asc())
-                       .first())
-                if row:
+                q = (db.query(_RR, _BOT).outerjoin(_BOT, _RR.object_type_id == _BOT.id)
+                     .filter(_RR.book_version_id == book.id,
+                             (_f.coalesce(_RR.a, 0) != 0) | (_f.coalesce(_RR.b, 0) != 0))
+                     .filter((_RR.description.ilike(f"%{kw}%"))
+                             | (_BOT.name.ilike(f"%{kw}%"))))
+                # строки-коэффициенты отбрасываем (это множители, не работы)
+                for _bad in _COEFF_ROW_MARKERS:
+                    q = q.filter(~_f.coalesce(_RR.description, "").ilike(f"%{_bad}%"))
+                # книга различает полевые/камеральные/лабораторные в имени типа →
+                # берём строку нужного вида работ
+                markers = _WORK_CAT_MARKERS.get(wcat, ())
+                cand = None
+                if markers:
+                    mq = q
+                    for mk in markers:
+                        mq = mq.filter(_f.coalesce(_BOT.name, "").ilike(f"%{mk}%"))
+                    cand = (mq.order_by((_f.coalesce(_RR.a, 0) + _f.coalesce(_RR.b, 0)).asc())
+                            .first())
+                if cand is None:
+                    cand = (q.order_by((_f.coalesce(_RR.a, 0) + _f.coalesce(_RR.b, 0)).asc())
+                            .first())
+                if cand:
+                    row, _ot = cand
+                    _ot_name = _ot.name if _ot else ""
                     break
             if row is None or row.id in seen:
                 continue
             seen.add(row.id)
-            _ot = db.query(_BOT).filter(_BOT.id == row.object_type_id).first()
             out.append({
                 "work_category": wcat, "a": float(row.a or 0), "b": float(row.b or 0),
                 "volume": vol, "k": 1.0, "table_num": row.table_num,
                 "row_num": row.row_num or "", "x_unit": row.x_unit or "",
-                "description": row.description or (_ot.name if _ot else ""),
-                "object_type_name": (_ot.name if _ot else ""), "auto": True,
+                "description": row.description or _ot_name,
+                "object_type_name": _ot_name, "auto": True,
             })
         return out
 
@@ -143,7 +178,64 @@ def _autobuild_survey_items(db: Session, book) -> list[dict]:
     # своими ключами → пробуем геологический (самый общий)
     if not items and cat != "geology":
         items = _run(_SURVEY_DEFAULTS["geology"])
+    if items:
+        items.extend(_survey_surcharge_items(db, book))
     return items
+
+
+def _survey_surcharge_items(db: Session, book) -> list[dict]:
+    """Процентные надбавки изысканий из book_conditions — данные, не код.
+
+    Конвенция (универсальная, per книга):
+      coeff_key = 'surcharge_<slug>'  → coeff_min = процент (напр. 13.2)
+      row_range = база начисления: 'field' | 'lab' | 'kameral' | 'field+percent'
+                  (пусто → 'field')
+      condition_short = наименование позиции в смете
+      coeff_max      = номер таблицы книги (для обоснования), необязательно
+
+    Источник процентов — общие положения самих НЗ/СБЦ (транспорт, работы в
+    неблагоприятный период, организация и ликвидация работ на объекте).
+    """
+    from app.models import BookCondition as _BC
+    rows = (db.query(_BC)
+            .filter(_BC.book_version_id == book.id,
+                    _BC.coeff_key.ilike("surcharge_%"),
+                    _BC.coeff_min.isnot(None))
+            .order_by(_BC.id)
+            .all())
+    items: list[dict] = []
+    for r in rows:
+        base = (r.row_range or "field").strip() or "field"
+        items.append({
+            "work_category": "percent",
+            "pct": float(r.coeff_min),
+            "percent_base": base,
+            "counts_as": "percent",
+            "table_num": int(r.coeff_max) if r.coeff_max is not None else (r.table_num or 0),
+            "row_num": "",
+            "description": r.condition_short,
+            "object_type_name": r.condition_short,
+            "auto": True,
+        })
+    return items
+
+
+def _pick_survey_book(db: Session, cat: str, allow_regional: bool):
+    """Активная survey-книга нужного вида изысканий (geodesy/geology/…).
+
+    Региональные книги (region задан) — только при allow_regional (московский
+    горзаказ); при равных условиях приоритет у более свежей базы цен.
+    """
+    q = (db.query(ReferenceBook)
+         .filter(ReferenceBook.is_active.is_(True),
+                 ReferenceBook.calc_method == "survey"))
+    books = [b for b in q.all() if _survey_category(b.code) == cat]
+    if not allow_regional:
+        books = [b for b in books if not b.region]
+    if not books:
+        return None
+    books.sort(key=lambda b: (1 if b.region else 0, b.price_base_year or 0), reverse=True)
+    return books[0]
 
 
 # ── Форма 3П: госэкспертиза (Пост. Правительства РФ № 145, Приложение) ──────────
@@ -1016,6 +1108,26 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     # Автосборка изысканий: {book_id: {book_code, names[]}} — survey-позиции,
     # распознанные в ТЗ, но требующие ручного ввода объёмов
     _auto_surveys: dict[int, dict] = {}
+    # АСУТП считается ПОСЛЕ основных позиций — нужно знать, есть ли объекты
+    # автоматизации (их цена уже включает автоматизацию этих объектов)
+    _asutp_pending: list[dict] = []
+
+    # ── Составные части: одна книга+таблица и ТОТ ЖЕ показатель X ─────────────
+    # Узел учёта/составной элемент, вынесенный экстрактором в отдельную позицию,
+    # задваивает стоимость: в НЗ он учтён в цене основного объекта. Ловим по
+    # совпадению (книга, таблица, X, единица) при ЗАПОЛНЕННОМ X.
+    _dup_of: dict[int, str] = {}
+    _seen_key: dict[tuple, str] = {}
+    for _i, _e in enumerate(entities):
+        _xv = _e.get("x_value")
+        if _xv is None or not _e.get("sbts_code") or not _e.get("sbts_table"):
+            continue
+        _key = (_e.get("sbts_code"), _e.get("sbts_table"),
+                round(float(_xv), 6), (_e.get("x_unit") or "").strip().lower())
+        if _key in _seen_key:
+            _dup_of[_i] = _seen_key[_key]
+        else:
+            _seen_key[_key] = _e.get("object_name", "") or _e.get("object_type", "")
 
     if stage in ("П", "Р"):
         only, other = (("ПД", "рабочая"), ("РД", "проектная"))[stage == "Р"]
@@ -1025,7 +1137,7 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             f"переключите «Стадии» на ПД+РД"
         )
 
-    for entity in entities:
+    for _ent_idx, entity in enumerate(entities):
         sbts_code      = entity.get("sbts_code", "")
         table_num      = entity.get("sbts_table")
         object_type_id = entity.get("sbts_object_type_id")
@@ -1034,6 +1146,27 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         x_unit         = entity.get("x_unit", "")
         object_name    = entity.get("object_name", "")
         qty            = max(1, int(entity.get("quantity") or 1))
+
+        # Составная часть другой позиции (та же книга/таблица/X) — не задваиваем
+        if _ent_idx in _dup_of:
+            warnings.append(
+                f"{object_name}: позиция НЕ включена в смету — та же таблица "
+                f"№{table_num} справочника {sbts_code} и тот же показатель "
+                f"X={_fmt_ru(x_value)} {x_unit}, что у позиции «{_dup_of[_ent_idx]}»: "
+                f"составные элементы (узлы учёта, оборудование объекта) учтены в цене "
+                f"основного объекта. Если это самостоятельный объект — задайте свой "
+                f"показатель X или другую таблицу"
+            )
+            continue
+
+        # Экстрактор не определил справочник — позиция не теряется молча
+        if not sbts_code:
+            errors.append(
+                f"{object_name}: справочник не определён — позиция требует уточнения "
+                f"(укажите книгу и таблицу в карточке позиции или уточните ТЗ). "
+                f"В смету НЕ включена"
+            )
+            continue
 
         book = _find_active_book(db, sbts_code)
         if not book:
@@ -1051,13 +1184,9 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             continue
 
         # ── ASUTP factor-based path (no table_num needed) ────────────────────
+        # Считается после основного цикла: нужно знать состав проектных позиций
         if getattr(book, 'calc_method', 'standard') == 'asutp':
-            try:
-                pos = _calculate_asutp_position(entity, book, db, stage, warnings=warnings)
-                pos["num"] = len(positions) + 1
-                positions.append(pos)
-            except ValueError as exc:
-                errors.append(f"{object_name}: {exc}")
+            _asutp_pending.append({"entity": entity, "book": book, "name": object_name})
             continue
 
         # Гард: справочник активен, но НЕ оцифрован (0 строк) → внятная ошибка,
@@ -1229,6 +1358,26 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
         if qty > 1:
             formula += f"*{qty}"
 
+        # Обследование инженерных систем нормируется ПО КАЖДОЙ системе отдельно
+        # (СБЦП-25 гл.2.5: отопление, ГВС, ХВС/канализация, электроснабжение,
+        # связь…). Одна обобщённая позиция = недобор в разы.
+        if (getattr(book, "calc_method", "standard") == "obsledovanie"
+                and qty == 1 and match.used_minimum):
+            _sib = (db.query(ReferenceRow)
+                    .filter(ReferenceRow.book_version_id == book.id,
+                            ReferenceRow.table_num == table_num)
+                    .all())
+            _variants = sorted({(r.row_num or "").strip() for r in _sib if r.row_num})
+            if len(_variants) > 1:
+                _sample = ", ".join(
+                    (r.description or "")[:40] for r in _sib[:4] if r.description)
+                warnings.append(
+                    f"{object_name}: в таблице №{table_num} {book.code} "
+                    f"{len(_variants)} нормируемых видов обследования "
+                    f"({_sample}…) — в смете ОДНА обобщённая позиция. Укажите "
+                    f"перечень обследуемых систем/конструкций, иначе стоимость занижена"
+                )
+
         entity_sections = [
             s.strip() for s in (entity.get("sections") or []) if s and s.strip()
         ]
@@ -1323,8 +1472,114 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
                 "work_kind":           getattr(book, "calc_method", "standard"),
             })
 
+    # ── АСУТП (факторный СБЦП-22) ─────────────────────────────────────────────
+    # Автоматизация и диспетчеризация ОТДЕЛЬНОГО объекта (ИТП, насосная, узел)
+    # входит в цену проектирования самого объекта. Отдельная позиция по
+    # факторному справочнику оправдана только когда в ТЗ есть данные для
+    # факторов (перечень функций/операций/переменных) — иначе факторы назначает
+    # AI, и позиция раздувается до «полной АСУТП предприятия».
+    _design_positions = [p for p in positions
+                         if p.get("work_kind") in (None, "", "standard")]
+    for _pend in _asutp_pending:
+        _e, _b, _nm = _pend["entity"], _pend["book"], _pend["name"]
+        _no_data = _e.get("x_value") is None and bool(_e.get("x_value_missing_reason"))
+        if _no_data and _design_positions:
+            _objs = ", ".join(dict.fromkeys(p["name"] for p in _design_positions))[:160]
+            warnings.append(
+                f"{_nm}: в ТЗ нет количественных данных для факторного расчёта АСУТП "
+                f"(перечень функций/операций/переменных отсутствует) — отдельная позиция "
+                f"по {_b.code} НЕ включена: автоматизация и диспетчеризация объектов "
+                f"({_objs}) учтена в цене их проектирования. Если по ТЗ требуется "
+                f"самостоятельная АСУТП — задайте перечень функций автоматизации "
+                f"в карточке позиции"
+            )
+            continue
+        try:
+            pos = _calculate_asutp_position(_e, _b, db, stage, warnings=warnings)
+            pos["num"] = len(positions) + 1
+            positions.append(pos)
+        except ValueError as exc:
+            errors.append(f"{_nm}: {exc}")
+
+    # ── Обследования: преддоговорные работы (% от стоимости обследований) ─────
+    # СБЦП-25 гл.2.1/2.5: преддоговорные работы — 10% от стоимости обмерных и
+    # обследовательских работ. Процент берётся из book_conditions (coeff_key=
+    # 'preddogovor'), книга — любая с calc_method='obsledovanie'.
+    from app.models import BookCondition as _BCond
+    _obsl_books: dict[str, list[dict]] = {}
+    for p in positions:
+        if p.get("work_kind") == "obsledovanie":
+            _obsl_books.setdefault(p["book_code"], []).append(p)
+    for _bcode, _bpos in _obsl_books.items():
+        _bk = _find_active_book(db, _bcode)
+        if not _bk:
+            continue
+        _pd = (db.query(_BCond)
+               .filter(_BCond.book_version_id == _bk.id,
+                       _BCond.coeff_key == "preddogovor",
+                       _BCond.coeff_min.isnot(None))
+               .first())
+        if not _pd:
+            continue
+        _pct = float(_pd.coeff_min)
+        _sum_cur = sum(p["cost"] for p in _bpos)
+        _sum_base = sum(p["cost_base"] for p in _bpos)
+        if _sum_cur <= 0:
+            continue
+        _first = _bpos[0]
+        positions.append({
+            "num": len(positions) + 1,
+            "name": "Преддоговорные работы",
+            "row_description": _pd.condition_short,
+            "unit": "%", "quantity": round(_pct * 100, 2), "item_count": 1,
+            "justification": (
+                f"{_bcode}: {_pd.condition_short} — {_fmt_ru(round(_pct * 100, 1))}% "
+                f"от стоимости обследований ({_fmt_ru(round(_sum_cur))} руб)"),
+            "formula": f"{_fmt_ru(round(_sum_cur))}×{_fmt_ru(round(_pct * 100, 1))}%",
+            "cost": round(_sum_cur * _pct, 2),
+            "cost_base": round(_sum_base * _pct, 2),
+            "book_code": _bcode,
+            "price_base_year": _first["price_base_year"],
+            "price_index": _first["price_index"],
+            "price_index_period": _first["price_index_period"],
+            "price_index_justification": _first["price_index_justification"],
+            "table_num": None, "row_num": "", "used_minimum": False,
+            "section_num": 0, "section_name": _first.get("section_name", ""),
+            "stage_label": "", "stage_pct": 1.0,
+            "work_kind": "obsledovanie", "_stage_embedded": True,
+        })
+
     # ── ИГИ geological surveys ────────────────────────────────────────────────
     geological_surveys = entities_dict.get("geological_surveys", [])
+    # ── Полный состав изысканий по общей формулировке ТЗ ──────────────────────
+    # «Выполнить необходимые инженерные изыскания» без перечня видов (флаг
+    # surveys_scope='all' от экстрактора) = все основные виды по СП 47.13330:
+    # геодезия, геология, гидрометеорология, экология. Недостающие добираем
+    # активными книгами соответствующего вида (регионалные — только горзаказ).
+    _allow_regional = entities_dict.get("funding_source") == "moscow_city"
+    if entities_dict.get("surveys_scope") == "all" and (positions or _auto_surveys):
+        _present = {_survey_category(s.get("book_code", "")) for s in geological_surveys}
+        _present |= {_survey_category(b["book_code"]) for b in _auto_surveys.values()}
+        from app.services.igi_calculator import _survey_label as _slabel
+        for _cat in ("geodesy", "geology", "hydromet", "ecology"):
+            if _cat in _present:
+                continue
+            _bk = _pick_survey_book(db, _cat, _allow_regional)
+            if _bk is None:
+                warnings.append(
+                    f"ТЗ требует выполнить необходимые инженерные изыскания без перечня "
+                    f"видов, но активного справочника вида «{_cat}» нет в системе — "
+                    f"этот раздел изысканий НЕ рассчитан"
+                )
+                continue
+            _auto_surveys.setdefault(
+                _bk.id, {"book_code": _bk.code, "names": ["по общей формулировке ТЗ"]})
+            warnings.append(
+                f"Изыскания «{_slabel(_bk.code)}» добавлены по общей формулировке ТЗ "
+                f"(«необходимые инженерные изыскания», перечень видов не задан) — "
+                f"справочник {_bk.code}. Если вид не требуется, удалите раздел"
+            )
+
     # Автосборка: изыскания, распознанные в позициях ТЗ, но без ручного блока —
     # выносим как раздел «Изыскания» с предупреждением о необходимости объёмов
     if _auto_surveys:
@@ -1370,9 +1625,16 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     # РПнж = (Спд + Сиж) × П × Ki; Спд — проектная документация (ПД), Сиж —
     # изыскания, в базовых нормативных ценах (сумма cost_base). Ориентировочно:
     # при смешанных базах книг «цены 2001» приблизительны.
-    _want_expertise = entities_dict.get("include_expertise") or any(
-        "экспертиз" in ((e.get("object_name") or "") + " " + (e.get("object_type") or "")).lower()
-        for e in entities)
+    # Триггеры: явный флаг пользователя, признак «ПД подлежит госэкспертизе»
+    # из текста ТЗ (expertise_required, детерминированно в экстракторе) или
+    # позиция с «экспертиз» в названии.
+    _want_expertise = (
+        entities_dict.get("include_expertise")
+        or entities_dict.get("expertise_required")
+        or any("экспертиз" in ((e.get("object_name") or "") + " "
+                               + (e.get("object_type") or "")).lower()
+               for e in entities)
+    )
     if _want_expertise and positions:
         # Текущая стоимость ПД (проектная документация) и изысканий.
         design_cur = sum(p["cost"] for p in positions
