@@ -40,7 +40,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      or-proxy:
+      or-vless:
         condition: service_started
     ports:
       - "127.0.0.1:8010:8000"
@@ -77,15 +77,19 @@ services:
       - backend
 
   # Egress-прокси для OpenRouter: OpenRouter гео-блокирует российский IP прод-
-  # сервера (403 "Access denied by security policy"). gost выступает клиентом
-  # shadowsocks к ноде в Германии (45.11.24.128) и поднимает локальный HTTP-прокси
-  # на :8118 — backend ходит через него (OPENROUTER_PROXY=http://or-proxy:8118).
-  # Параметры SS-сервера — в /opt/pir/.env (SS_CIPHER/SS_PASSWORD/SS_HOST/SS_PORT).
-  or-proxy:
-    image: ginuerzh/gost
-    container_name: or-proxy
+  # сервера (403 "Access denied by security policy"). Xray-клиент поднимает
+  # локальный HTTP-прокси на :8118 и уводит трафик по VLESS+Reality на узел
+  # заказчика (выход — Лондон); backend ходит через него
+  # (OPENROUTER_PROXY=http://or-vless:8118 в /opt/pir/.env).
+  # Параметры узла (uuid/pbk/sid/sni) — в /opt/pir/xray/config.json, НЕ в репо.
+  # Прежняя схема (gost + shadowsocks к ноде 45.11.24.128) снята 04.09.2026:
+  # ТСПУ режет прод→нода по данным (TCP-хендшейк проходит, payload дропается).
+  or-vless:
+    image: teddysun/xray:latest
+    container_name: or-vless
     restart: unless-stopped
-    command: -L=http://:8118 -F=ss://${SS_CIPHER}:${SS_PASSWORD}@${SS_HOST}:${SS_PORT}
+    volumes:
+      - /opt/pir/xray/config.json:/etc/xray/config.json:ro
 
 volumes:
   pgdata:
