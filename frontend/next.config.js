@@ -1,5 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Корень уводим на /projects правилом сервера, а не redirect() в RSC:
+  // пререндер корневой страницы отдавал 307 БЕЗ заголовка Location (браузер
+  // на голом домене получал ошибку вместо перехода).
+  async redirects() {
+    return [{ source: '/', destination: '/projects', permanent: false }]
+  },
   async rewrites() {
     return [
       {
