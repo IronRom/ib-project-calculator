@@ -556,9 +556,22 @@ _UNIT_ALIASES: dict[str, str] = {
 }
 
 
+# Те же словоформы после _normalize_unit («… / сутки» → «… / сут»): в матчер
+# единицы приходят уже нормализованными, а ключи словаря — в исходном виде.
+_UNIT_ALIASES_NORM: dict[str, str] = {
+    _normalize_unit(k): v for k, v in _UNIT_ALIASES.items()
+}
+
+
 def _canonical_unit(u: str) -> str:
     """Normalize unit to canonical abbreviation for conversion lookup."""
-    return _UNIT_ALIASES.get(u.strip(), u.strip())
+    s = u.strip()
+    if s in _UNIT_ALIASES:
+        return _UNIT_ALIASES[s]
+    n = _normalize_unit(s)
+    if n in _UNIT_ALIASES_NORM:
+        return _UNIT_ALIASES_NORM[n]
+    return s
 
 
 @dataclass
@@ -583,6 +596,9 @@ class RowMatch:
     type_fallback: bool = False
     # 707/пр п.133 ф.8.6–8.8: a-only таблица → цена интер/экстраполирована напрямую (тыс.руб)
     override_price_thous: Optional[float] = None
+    # X задан в размерности, несопоставимой с единицей таблицы (расход против
+    # массы сухого вещества и т.п.) → (единица из ТЗ, единицы таблицы)
+    unit_mismatch: Optional[tuple[str, str]] = None
 
 
 # Physical units requiring actual dimensional conversion.
@@ -667,7 +683,7 @@ def _match_row(
     # граница диапазона. Флэт «до N» (без нижней границы) и штучные — как есть.
     # Так условная цена — минимальная реалистичная, а не максимум брекета
     # (защита от ×2). Реальное значение вводится на экране финализации.
-    if x_value is None:
+    def _minimum_match(**extra) -> RowMatch:
         def _row_key(r: ReferenceRow) -> float:
             if r.x_min is not None:
                 return float(r.x_min)
@@ -684,7 +700,10 @@ def _match_row(
             x_eff = 1.0                          # штучная строка: цена за единицу × 1
         if x_eff <= 0:
             x_eff = 1.0
-        return _mk(first_row, x_eff, False, None, "", used_minimum=True)
+        return _mk(first_row, x_eff, False, None, "", used_minimum=True, **extra)
+
+    if x_value is None:
+        return _minimum_match()
 
     x_unit_norm = _normalize_unit(x_unit)
 
@@ -708,7 +727,14 @@ def _match_row(
         candidates.append((x_eff, note, rows_for_unit))
 
     if not candidates:
-        return None
+        # Показатель задан в размерности, которую к строкам таблицы привести
+        # нечем (расход тыс. м³/сут против нормируемой массы сухого вещества
+        # т/сут и т.п.): число правдоподобно попадает в диапазон, но нормирует
+        # ДРУГОЙ параметр. Позицию не теряем — условный минимум + объяснение,
+        # в каких единицах нужен X.
+        _tbl_units = ", ".join(sorted({(r.x_unit or "").strip()
+                                       for r in all_rows if (r.x_unit or "").strip()}))
+        return _minimum_match(unit_mismatch=((x_unit or "").strip(), _tbl_units))
 
     # Pass 1: exact range match
     for x_eff, note, rows in candidates:
@@ -1290,18 +1316,30 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
     # Узел учёта/составной элемент, вынесенный экстрактором в отдельную позицию,
     # задваивает стоимость: в НЗ он учтён в цене основного объекта. Ловим по
     # совпадению (книга, таблица, X, единица) при ЗАПОЛНЕННОМ X.
+    # ТИП ОБЪЕКТА обязателен к сверке: одна таблица нормирует РАЗНЫЕ сооружения
+    # по одному показателю (НЗ-53 т.12: биоочистка, мехочистка, доочистка,
+    # УФ-обеззараживание — все по расходу станции) — это самостоятельные
+    # объекты, а не составные части друг друга. Дубль только при совпавшем
+    # типе; тип не задан хотя бы у одной позиции → считаем совпадением (как было).
     _dup_of: dict[int, str] = {}
-    _seen_key: dict[tuple, str] = {}
+    _seen_key: dict[tuple, list[tuple[Optional[int], str]]] = {}
     for _i, _e in enumerate(entities):
         _xv = _e.get("x_value")
         if _xv is None or not _e.get("sbts_code") or not _e.get("sbts_table"):
             continue
         _key = (_e.get("sbts_code"), _e.get("sbts_table"),
                 round(float(_xv), 6), (_e.get("x_unit") or "").strip().lower())
-        if _key in _seen_key:
-            _dup_of[_i] = _seen_key[_key]
+        _tid = _e.get("sbts_object_type_id")
+        _name = _e.get("object_name", "") or _e.get("object_type", "")
+        _prev = _seen_key.setdefault(_key, [])
+        _match_prev = next(
+            (nm for (tid, nm) in _prev if tid is None or _tid is None or tid == _tid),
+            None,
+        )
+        if _match_prev is not None:
+            _dup_of[_i] = _match_prev
         else:
-            _seen_key[_key] = _e.get("object_name", "") or _e.get("object_type", "")
+            _prev.append((_tid, _name))
 
     if stage in ("П", "Р"):
         only, other = (("ПД", "рабочая"), ("РД", "проектная"))[stage == "Р"]
@@ -1493,6 +1531,12 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             justification += f"; {label} (К={_fmt_ru(_val)})"
         if match.used_minimum:
             missing_hint = entity.get("x_value_missing_reason") or ""
+            if match.unit_mismatch:
+                _given_u, _tbl_u = match.unit_mismatch
+                missing_hint = (
+                    f"задайте X в единицах таблицы «{_tbl_u}»"
+                    + (f" (в ТЗ показатель дан в «{_given_u}»)" if _given_u else "")
+                )
             justification += f" [условный X={_fmt_ru(match.x_effective)}"
             if missing_hint:
                 justification += f"; для точного расчёта: {missing_hint}"
@@ -1500,12 +1544,23 @@ def calculate(entities_dict: dict[str, Any], db: Session) -> dict[str, Any]:
             is_unit_row = row.x_min is None and row.x_max is None
             basis = ("штучная позиция — принята 1 ед." if is_unit_row
                      else "условный минимум (нижняя граница первой строки таблицы)")
-            warnings.append(
-                f"{object_name}: X отсутствует в ТЗ — УСЛОВНО принято "
-                f"X={_fmt_ru(match.x_effective)} {row_unit or 'ед.'} "
-                f"({basis}, табл. №{table_num}), цена ориентировочная"
-                + (f". Для точного расчёта: {missing_hint}" if missing_hint else "")
-            )
+            if match.unit_mismatch:
+                _given_u, _tbl_u = match.unit_mismatch
+                warnings.append(
+                    f"{object_name}: показатель X={_fmt_ru(x_value)} {_given_u} "
+                    f"НЕСОПОСТАВИМ с единицей таблицы №{table_num} «{_tbl_u}» — "
+                    f"таблица нормирует объект по другому параметру, значение из ТЗ "
+                    f"в этой размерности неприменимо. УСЛОВНО принято "
+                    f"X={_fmt_ru(match.x_effective)} {row_unit or 'ед.'} ({basis}), "
+                    f"цена ориентировочная. Задайте X в «{_tbl_u}»"
+                )
+            else:
+                warnings.append(
+                    f"{object_name}: X отсутствует в ТЗ — УСЛОВНО принято "
+                    f"X={_fmt_ru(match.x_effective)} {row_unit or 'ед.'} "
+                    f"({basis}, табл. №{table_num}), цена ориентировочная"
+                    + (f". Для точного расчёта: {missing_hint}" if missing_hint else "")
+                )
 
         # ── Formula (расчёт стоимости) ────────────────────────────────────────
         a_rub, b_rub = a * 1000, b * 1000
