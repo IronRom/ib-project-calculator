@@ -779,3 +779,95 @@ def test_report_table_extrapolates_down_707pr(db):
     a1, a2 = 134_685.0, 203_793.0
     expected = a1 - (a2 - a1) / (50 - 20) * (20 - 0.2) * 0.6
     assert math.isclose(tiny, expected, rel_tol=1e-6), (tiny, expected)
+
+
+# ── Единицы показателя X ─────────────────────────────────────────────────
+
+def test_x_unit_mismatch_is_conditional_not_error(db):
+    """[Гай] Показатель в чужой размерности → условный минимум, не «строка не найдена».
+
+    КОС нормируются по расходу (тыс. м³/сут), цех механического обезвоживания
+    осадка (НЗ-53 т.13 п.2) — по массе сухого вещества (т/сут). Модель переносит
+    производительность станции 12,645 тыс. м³/сут на все позиции объекта;
+    число попадает в диапазон 1–50 т/сут, поэтому проверка размерности
+    обязательна. Позиция не теряется: считается по минимуму таблицы с пометкой
+    «условный X» и требованием задать X в «тонн / сутки».
+    """
+    r = calculate({"stage": "П+Р", "region": "Оренбургская обл.", "entities": [_ent(
+        object_name="Цех обезвоживания осадка", category="reconstruction",
+        sbts_code="НЗ-2025-МС53-ВК", sbts_table=13,
+        sbts_object_type_id=_tid53(db, "механического обезвоживания", 13),
+        x_value=12.645, x_unit="тысяч кубических метров / сутки",
+    )]}, db)
+    assert not r["errors"], r["errors"]
+    pd = _one(r, "ПД")
+    assert pd["x_conditional"] is True
+    assert "тонн / сутки" in pd["justification"]
+    assert any("НЕСОПОСТАВИМ" in w and "тонн / сутки" in w for w in r["warnings"]), r["warnings"]
+
+
+def test_extractor_drops_x_in_wrong_unit(db):
+    """Тот же случай на выходе экстрактора: X в чужой размерности обнуляется
+    с объяснением, X в родной — остаётся (проверка детерминированная, без AI)."""
+    from app.schemas import ExtractedEntity, ExtractionResult
+    from app.services.entity_extractor import _flag_missing_x_values
+
+    def _e(**kw):
+        base = {"category": "reconstruction", "object_type": "t", "object_name": "o",
+                "address": "-", "quantity": 1, "coefficients": []}
+        base.update(kw)
+        return ExtractedEntity(**base)
+
+    res = ExtractionResult(entities=[
+        _e(object_name="Цех обезвоживания", sbts_code="НЗ-2025-МС53-ВК", sbts_table=13,
+           sbts_object_type_id=_tid53(db, "механического обезвоживания", 13),
+           x_value=12.645, x_unit="тысяч кубических метров / сутки"),
+        _e(object_name="Биологическая очистка", sbts_code="НЗ-2025-МС53-ВК", sbts_table=12,
+           sbts_object_type_id=_tid53(db, "биологической очистки", 12),
+           x_value=12.645, x_unit="тысяч кубических метров / сутки"),
+    ], missing_data=[])
+    _flag_missing_x_values(res, db)
+    bad, good = res.entities
+    assert bad.x_value is None and bad.x_unit == "тонн / сутки"
+    assert "тонн / сутки" in (bad.x_value_missing_reason or "")
+    assert good.x_value == 12.645
+
+
+def test_unit_aliases_survive_normalization(db):
+    """Длинные словоформы единиц («кубических метров / сутки») конвертируются
+    после _normalize_unit: иначе м³/сут из ТЗ не сводился к тыс. м³/сут книги
+    и позиция падала в «строка не найдена». Расчёт по 2000 м³/сут и по
+    2 тыс. м³/сут должен совпасть копейка в копейку.
+    """
+    def _kos(x, unit):
+        r = calculate({"stage": "П", "region": "-", "entities": [_ent(
+            object_name="КОС", sbts_code="НЗ-2025-МС53-ВК", sbts_table=12,
+            sbts_object_type_id=_tid53(db, "биологической очистки", 12),
+            x_value=x, x_unit=unit,
+        )]}, db)
+        assert not r["errors"], r["errors"]
+        return _one(r, "ПД")["cost"]
+
+    assert math.isclose(_kos(2000, "кубических метров / сутки"),
+                        _kos(2, "тыс. м³/сут"), rel_tol=1e-9)
+
+
+def test_same_table_different_types_are_separate_positions(db):
+    """[Гай] Одна таблица нормирует РАЗНЫЕ сооружения по одному показателю
+    (НЗ-53 т.12: биологическая очистка, доочистка, УФ-обеззараживание — все по
+    расходу станции). Это самостоятельные объекты, а не составные части
+    друг друга: гард «составной части» не должен их гасить."""
+    x = dict(x_value=12.645, x_unit="тыс. м³/сут", category="reconstruction",
+             sbts_code="НЗ-2025-МС53-ВК", sbts_table=12)
+    r = calculate({"stage": "П", "region": "-", "entities": [
+        _ent(object_name="Биоочистка",
+             sbts_object_type_id=_tid53(db, "биологической очистки", 12), **x),
+        _ent(object_name="Доочистка",
+             sbts_object_type_id=_tid53(db, "доочистки сточных вод на фильтрах", 12), **x),
+        _ent(object_name="УФ-обеззараживание",
+             sbts_object_type_id=_tid53(db, "обеззараживания", 12), **x),
+    ]}, db)
+    assert not r["errors"], r["errors"]
+    assert {p["name"] for p in r["positions"]} == {
+        "Биоочистка", "Доочистка", "УФ-обеззараживание"}
+    assert not any("составные элементы" in w for w in r["warnings"]), r["warnings"]

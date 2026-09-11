@@ -924,13 +924,77 @@ def _merge_resolved_x(result: ExtractionResult, resolutions: list[dict]) -> None
         entity.notes = (prefix + "\n" + (entity.notes or "")).strip()
 
 
-def _flag_missing_x_values(result: ExtractionResult) -> None:
+def _drop_x_with_wrong_unit(result: ExtractionResult, db) -> None:
+    """Отбросить X, заданный в размерности, несопоставимой с единицей таблицы.
+
+    Модель переносит главный показатель объекта на все его позиции: КОС
+    нормируются по расходу (тыс. м³/сут), а цех обезвоживания осадка — по массе
+    сухого вещества (т/сут). Число при этом правдоподобно попадает в диапазон
+    строки, поэтому без проверки размерности смета считалась бы по ЧУЖОМУ
+    параметру. Единицы берутся из строк справочника — правил про конкретные
+    книги в коде нет.
+    """
+    if db is None:
+        return
+    from app.models import ReferenceRow
+    from app.services.calculator import _find_active_book, _normalize_unit, _try_convert
+
+    units_cache: dict[tuple[int, int, int], list[str]] = {}
+    for entity in result.entities:
+        if entity.x_value is None or not entity.sbts_table or not (entity.x_unit or "").strip():
+            continue
+        book = _find_active_book(db, entity.sbts_code or "")
+        if not book:
+            continue
+        type_id = entity.sbts_object_type_id or 0
+        key = (book.id, entity.sbts_table, type_id)
+        if key not in units_cache:
+            base = db.query(ReferenceRow.x_unit).filter(
+                ReferenceRow.book_version_id == book.id,
+                ReferenceRow.table_num == entity.sbts_table,
+                ReferenceRow.x_unit.isnot(None),
+            )
+            units: list[str] = []
+            if type_id:
+                units = [u.strip() for (u,) in
+                         base.filter(ReferenceRow.object_type_id == type_id).distinct().all()
+                         if (u or "").strip()]
+            if not units:
+                units = [u.strip() for (u,) in base.distinct().all() if (u or "").strip()]
+            units_cache[key] = units
+        table_units = units_cache[key]
+        if not table_units:
+            continue
+        x_norm = _normalize_unit(entity.x_unit)
+        if any(_try_convert(float(entity.x_value), x_norm, _normalize_unit(u)) is not None
+               for u in table_units):
+            continue
+
+        shown = ", ".join(sorted(set(table_units)))
+        old_x, old_u = entity.x_value, entity.x_unit
+        entity.notes = (
+            f"[единицы] X={old_x} {old_u} отброшен: таблица {entity.sbts_table} "
+            f"нормирует объект в «{shown}»\n" + (entity.notes or "")
+        ).strip()
+        entity.x_value = None
+        if len(set(table_units)) == 1:
+            entity.x_unit = table_units[0]
+        entity.x_value_missing_reason = (
+            f"Таблица №{entity.sbts_table} нормирует «{entity.object_type}» в «{shown}», "
+            f"а из ТЗ взято {old_x} {old_u} — другая размерность. Введите X в «{shown}»"
+        )
+
+
+def _flag_missing_x_values(result: ExtractionResult, db=None) -> None:
     """After all passes: mark entities where x_value is still None so UI can prompt manual entry."""
+    _drop_x_with_wrong_unit(result, db)
     for entity in result.entities:
         if entity.x_value is not None:
             continue
-        reason = f"Объём/мощность не указаны в ТЗ для «{entity.object_type}» — введите вручную"
-        entity.x_value_missing_reason = reason
+        if not entity.x_value_missing_reason:
+            entity.x_value_missing_reason = (
+                f"Объём/мощность не указаны в ТЗ для «{entity.object_type}» — введите вручную"
+            )
         result.missing_data.append(f"Нет X: {entity.object_type} ({entity.object_name or entity.address or '—'})")
 
 
@@ -1064,7 +1128,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
     _fill_sbts_codes(result, db, detected_codes)
 
     if not result.entities or db is None:
-        _flag_missing_x_values(result)
+        _flag_missing_x_values(result, db)
         _validate_entities(result, tz_text)
         return result
 
@@ -1127,7 +1191,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
                 _merge_resolved_x(result, block.input.get("resolutions", []))
                 break
 
-    _flag_missing_x_values(result)
+    _flag_missing_x_values(result, db)
     _validate_entities(result, tz_text)
     return result
 
@@ -1510,7 +1574,7 @@ async def _extract_entities_openrouter_impl(text: str, model_id: str, db=None,
                     "добавьте здание вручную, иначе смета сильно занижена.")
 
     if not result.entities or db is None:
-        _flag_missing_x_values(result)
+        _flag_missing_x_values(result, db)
         _validate_entities(result, tz_text)
         return result
 
@@ -1556,6 +1620,6 @@ async def _extract_entities_openrouter_impl(text: str, model_id: str, db=None,
             except (json.JSONDecodeError, KeyError):
                 pass
 
-    _flag_missing_x_values(result)
+    _flag_missing_x_values(result, db)
     _validate_entities(result, tz_text)
     return result
