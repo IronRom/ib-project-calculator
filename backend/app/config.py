@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     # OpenRouter-модель для vision-OCR сканов (document_parser._parse_pdf_vision)
     ocr_model: str = "anthropic/claude-sonnet-4.6"
     max_tz_chars: int = 50_000
+    # Потолок каталога типов объектов в промпте Pass 1, когда справочники
+    # НЕ определены (fallback). Полный каталог активных книг — ~470 тыс.
+    # символов (~180 тыс. токенов): это и дорого, и вредно для качества —
+    # модель выбирает из сотни книг. Берём релевантные ТЗ в пределах лимита.
+    max_catalog_chars: int = 120_000
     # ── Telegram-бот ──────────────────────────────────────────────────────
     # Общий секрет между ботом и backend для привилегированных вызовов
     # (/auth/telegram/link, /auth/telegram/resolve). Бот шлёт его в заголовке

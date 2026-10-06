@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from itertools import groupby
 from typing import Optional
@@ -9,6 +10,8 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.config import settings
 from app.schemas import CoefficientInput, ExtractionResult
+
+logger = logging.getLogger(__name__)
 
 _STRIP_TYPE_SUFFIX = re.compile(
     r'\s+(производительностью|мощностью|объёмом|длиной|протяженностью)'
@@ -158,15 +161,99 @@ def _build_book_list(db, allow_regional: bool = True) -> str:
     return "\n".join(lines)
 
 
+def _norm_book_code(s: str) -> str:
+    """Код справочника без префикса, пробелов и разделителей: «СБЦП 81-2001-17»,
+    «сбцп81-2001-17», «81.2001.17» → «81200117». Модель в Step 0 возвращает код
+    своей вёрсткой, а строгое сравнение давало 0 совпадений → fallback на ВЕСЬ
+    каталог (сотни тысяч символов в промпте)."""
+    s = re.sub(r'^(сбцп|сбц|мрр)\s+', '', (s or "").strip(), flags=re.IGNORECASE).lower()
+    return re.sub(r'[\s\-_.]+', '', s)
+
+
+def _match_books(books: list, book_codes: list[str]) -> list:
+    """Книги по кодам: точное совпадение нормализованных кодов, затем вхождение
+    (модель иногда дописывает/опускает хвост кода)."""
+    norm_codes = [c for c in (_norm_book_code(c) for c in book_codes) if len(c) >= 4]
+    if not norm_codes:
+        return []
+    exact = [b for b in books if _norm_book_code(b.code) in norm_codes]
+    if exact:
+        return exact
+    return [
+        b for b in books
+        if any(c in _norm_book_code(b.code) or _norm_book_code(b.code) in c
+               for c in norm_codes)
+    ]
+
+
+_SIGNIFICANT_WORD = re.compile(r"[а-яёa-z]{5,}", re.IGNORECASE)
+
+
+def _stems(text: str) -> set[str]:
+    """Грубая нормализация под русские окончания: слово от 5 букв → первые 6.
+    «очистные/очистных/очистными» → «очистн». Для лексической близости ТЗ и
+    названий типов объектов этого достаточно, словарей не требует."""
+    return {w.lower()[:6] for w in _SIGNIFICANT_WORD.findall(text or "")}
+
+
+def _rank_books_for_tz(db, books: list, tz_text: str, max_chars: int) -> tuple[list, list]:
+    """Книги, релевантные тексту ТЗ, в пределах бюджета символов.
+
+    Применяется ТОЛЬКО когда справочники не определены (Step 0 промолчал или
+    вернул коды, которых нет в системе). Прежнее поведение — отдать модели ВЕСЬ
+    каталог активных книг — давало промпт ~190 тыс. токенов (402 от OpenRouter
+    при скромном лимите ключа) и ухудшало выбор: нужная книга тонула в сотне
+    чужих. Релевантность — пересечение значимых слов ТЗ с названиями типов
+    объектов книги; правил про конкретные книги нет.
+
+    Возвращает (выбранные книги, отброшенные коды).
+    """
+    from app.models import BookObjectType
+
+    # То же правило, что и в _build_book_list: региональные (МРР) — только для
+    # московского горзаказа. Иначе они съедают бюджет каталога и тянут смету
+    # в чужую базу.
+    if _detect_funding(tz_text) != "moscow_city":
+        books = [b for b in books if not getattr(b, "region", None)]
+
+    tz_stems = _stems(tz_text)
+    names_by_book: dict[int, list[str]] = {}
+    for book_id, name in db.query(BookObjectType.book_version_id, BookObjectType.name).all():
+        names_by_book.setdefault(book_id, []).append(name or "")
+
+    scored: list[tuple[int, int, int, object]] = []
+    for b in books:
+        names = names_by_book.get(b.id) or []
+        # Размер блока книги оцениваем по названиям типов (строка ≈ имя + разметка)
+        size = sum(len(n) + 40 for n in names) + len(b.official_name or b.code) + 40
+        score = len(_stems(" ".join(names) + " " + (b.official_name or "")) & tz_stems)
+        scored.append((score, -size, size, b))
+
+    scored.sort(key=lambda t: (-t[0], t[1] * -1))  # score ↓, затем компактные вперёд
+    chosen, dropped, used = [], [], 0
+    for score, _, size, b in scored:
+        if score and used + size <= max_chars:
+            chosen.append(b)
+            used += size
+        else:
+            dropped.append(b.code)
+    if not chosen:  # ТЗ не дало ни одного пересечения — берём самые компактные
+        for _, _, size, b in sorted(scored, key=lambda t: t[2]):
+            if used + size > max_chars:
+                break
+            chosen.append(b)
+            used += size
+            if b.code in dropped:
+                dropped.remove(b.code)
+    return chosen, dropped
+
+
 def _build_hints_context(db, book_codes: list[str]) -> str:
     """Extraction hints for detected books — injected after types in pass 1."""
     from app.models import BookExtractionHint, ReferenceBook
 
     books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
-    _norm = lambda s: re.sub(r'^(сбцп|сбц|мрр)\s+', '', s.strip(), flags=re.IGNORECASE).lower()
-    matched = [b for b in books if any(_norm(b.code) == _norm(c) or b.code == c for c in book_codes)]
-    if not matched:
-        matched = books
+    matched = _match_books(books, book_codes) or books
 
     lines: list[str] = []
     for book in matched:
@@ -190,8 +277,15 @@ def _build_hints_context(db, book_codes: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _build_types_context(db, book_codes: list[str]) -> str:
-    """Pass 1: object types + extraction hints for the detected book(s) only."""
+def _build_types_context(
+    db, book_codes: list[str], tz_text: str = "", notes: Optional[list] = None
+) -> str:
+    """Pass 1: object types + extraction hints for the detected book(s) only.
+
+    Справочники не определены → не весь каталог, а релевантные ТЗ книги в
+    пределах `settings.max_catalog_chars` (см. `_rank_books_for_tz`); в `notes`
+    кладётся предупреждение для пользователя.
+    """
     from app.models import BookObjectType, ReferenceBook, ReferenceRow
 
     books = (
@@ -199,11 +293,22 @@ def _build_types_context(db, book_codes: list[str]) -> str:
         .filter(ReferenceBook.is_active == True)
         .all()
     )
-    # Match by code (normalized: strip prefix variants)
-    _norm = lambda s: re.sub(r'^(сбцп|сбц|мрр)\s+', '', s.strip(), flags=re.IGNORECASE).lower()
-    matched = [b for b in books if any(_norm(b.code) == _norm(c) or b.code == c for c in book_codes)]
+    matched = _match_books(books, book_codes)
     if not matched:
-        matched = books  # fallback: all books
+        matched, dropped = _rank_books_for_tz(
+            db, books, tz_text, settings.max_catalog_chars
+        )
+        logger.warning(
+            "Справочники не определены (коды из Step 0: %s) — каталог собран по "
+            "релевантности: %d книг из %d", book_codes, len(matched), len(books)
+        )
+        if notes is not None and dropped:
+            notes.append(
+                f"Справочник не определён по тексту ТЗ — модели предложены "
+                f"{len(matched)} наиболее подходящих книг из {len(books)} активных; "
+                f"если нужная книга не попала в список, укажите её код в ТЗ или "
+                f"задайте справочник в позиции вручную"
+            )
 
     lines = ["═══ ДОСТУПНЫЕ ТИПЫ ОБЪЕКТОВ ═══\n"]
     lines.append(
@@ -1092,7 +1197,7 @@ async def extract_entities(text: str, db=None) -> ExtractionResult:
                 detected_codes = [c.strip() for c in raw.split(",") if c.strip()]
 
     # ── Pass 1: extract entities ──────────────────────────────────────────────
-    types_ctx = _build_types_context(db, detected_codes) if db is not None else ""
+    types_ctx = _build_types_context(db, detected_codes, tz_text) if db is not None else ""
     hints_ctx = _build_hints_context(db, detected_codes) if db is not None else ""
     msg1_content = "Проанализируй ТЗ и извлеки все объекты:\n\n"
     if types_ctx:
@@ -1410,7 +1515,9 @@ async def _extract_entities_openrouter_impl(text: str, model_id: str, db=None,
 
     # ── Pass 1 ────────────────────────────────────────────────────────────────
     _progress("Извлечение позиций из ТЗ…")
-    types_ctx = _build_types_context(db, detected_codes) if db is not None else ""
+    catalog_notes: list[str] = []
+    types_ctx = (_build_types_context(db, detected_codes, tz_text, catalog_notes)
+                 if db is not None else "")
     hints_ctx = _build_hints_context(db, detected_codes) if db is not None else ""
     msg1_text = (
         "Проанализируй ТЗ и извлеки все объекты. Вызови функцию extract_pir_entities.\n\n"
@@ -1462,6 +1569,7 @@ async def _extract_entities_openrouter_impl(text: str, model_id: str, db=None,
             ],
             overall_confidence=0.0,
         )
+    result.missing_data.extend(catalog_notes)
     _fill_sbts_table_from_type_id(result, db)
     _fill_sbts_codes(result, db, detected_codes)
 
