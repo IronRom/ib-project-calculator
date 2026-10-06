@@ -871,3 +871,38 @@ def test_same_table_different_types_are_separate_positions(db):
     assert {p["name"] for p in r["positions"]} == {
         "Биоочистка", "Доочистка", "УФ-обеззараживание"}
     assert not any("составные элементы" in w for w in r["warnings"]), r["warnings"]
+
+
+# ── Каталог справочников в промпте Pass 1 ────────────────────────────────
+
+def test_book_code_matching_is_tolerant(db):
+    """Модель в Step 0 возвращает код своей вёрсткой. Строгое сравнение давало
+    0 совпадений → fallback на ВЕСЬ каталог (≈190 тыс. токенов в промпте)."""
+    from app.models import ReferenceBook
+    from app.services.entity_extractor import _match_books
+
+    books = db.query(ReferenceBook).filter(ReferenceBook.is_active == True).all()
+    for variant in ("СБЦП 81-2001-17", "сбцп81-2001-17", "81-2001-17", "СБЦ 81.2001.17"):
+        got = _match_books(books, [variant])
+        assert [b.code for b in got] == ["СБЦП 81-2001-17"], (variant, [b.code for b in got])
+    assert _match_books(books, []) == []
+
+
+def test_catalog_fallback_is_bounded_and_relevant(db):
+    """Справочник не определён → не весь каталог, а релевантные ТЗ книги
+    в пределах бюджета; региональные (МРР) — только для московского горзаказа."""
+    from app.config import settings
+    from app.services.entity_extractor import _build_types_context
+
+    tz = ("Техническое задание на проектирование очистных сооружений "
+          "хозяйственно-бытовой канализации и насосной станции металлургического "
+          "завода. Выполнить инженерно-геодезические и инженерно-геологические "
+          "изыскания. Источник финансирования — собственные средства заказчика. "
+          "Разработать проектную и рабочую документацию, систему автоматизации.")
+    notes: list[str] = []
+    ctx = _build_types_context(db, [], tz, notes)
+    assert len(ctx) <= settings.max_catalog_chars * 1.1, len(ctx)
+    assert "МРР" not in ctx
+    assert notes and "Справочник не определён" in notes[0]
+    # полный каталог кратно больше бюджета — иначе тест ничего не проверяет
+    assert len(_build_types_context(db, ["НЗ-2025-МС53-ВК"], tz)) < len(ctx)
