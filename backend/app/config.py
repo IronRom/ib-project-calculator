@@ -12,8 +12,9 @@ class Settings(BaseSettings):
     admin_password: str = "Admin12345!"
     uploads_dir: str = "/app/uploads"
     extraction_model: str = "claude-sonnet-4-6"
-    # OpenRouter-модель для vision-OCR сканов (document_parser._parse_pdf_vision)
-    ocr_model: str = "anthropic/claude-sonnet-4.6"
+    # OpenRouter-модель для vision-OCR сканов (document_parser._parse_pdf_vision).
+    # Только ДЕФОЛТ: рабочее значение — app_settings.ocr_model (админка).
+    ocr_model: str = "google/gemini-3.6-flash"
     max_tz_chars: int = 50_000
     # Потолок каталога типов объектов в промпте Pass 1, когда справочники
     # НЕ определены (fallback). Полный каталог активных книг — ~470 тыс.
