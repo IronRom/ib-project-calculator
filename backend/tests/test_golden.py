@@ -906,3 +906,34 @@ def test_catalog_fallback_is_bounded_and_relevant(db):
     assert notes and "Справочник не определён" in notes[0]
     # полный каталог кратно больше бюджета — иначе тест ничего не проверяет
     assert len(_build_types_context(db, ["НЗ-2025-МС53-ВК"], tz)) < len(ctx)
+
+
+def test_ocr_model_comes_from_app_settings(db):
+    """Переключатель «Модель OCR сканов» в админке должен РАБОТАТЬ: парсер
+    читает app_settings.ocr_model, а не только дефолт конфига (раньше настройка
+    сохранялась, но распознавание молча шло дефолтной моделью)."""
+    from app.config import settings
+    from app.models import AppSetting
+    from app.services.document_parser import _ocr_model
+
+    rec = db.query(AppSetting).filter(AppSetting.key == "ocr_model").first()
+    saved = rec.value if rec else None
+    try:
+        if rec:
+            rec.value = "test/ocr-model"
+        else:
+            db.add(AppSetting(key="ocr_model", value="test/ocr-model"))
+        db.commit()
+        assert _ocr_model() == "test/ocr-model"
+
+        # пустое значение → дефолт конфига, а не пустая строка в запросе
+        db.query(AppSetting).filter(AppSetting.key == "ocr_model").first().value = ""
+        db.commit()
+        assert _ocr_model() == settings.ocr_model
+    finally:
+        row = db.query(AppSetting).filter(AppSetting.key == "ocr_model").first()
+        if saved is None:
+            db.delete(row)
+        else:
+            row.value = saved
+        db.commit()

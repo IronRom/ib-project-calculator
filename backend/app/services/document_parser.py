@@ -32,9 +32,33 @@ def _parse_pdf(path: str) -> str:
     result = "\n".join(texts)
     if result.strip():
         return result
-    # Scanned PDF — no text layer, fall back to Claude Vision OCR
-    logger.info("No text layer in %s — using Claude Vision OCR", os.path.basename(path))
+    # Скан без текстового слоя → vision-OCR
+    logger.info("No text layer in %s — vision OCR (%s)",
+                os.path.basename(path), _ocr_model())
     return _parse_pdf_vision(path)
+
+
+def _ocr_model() -> str:
+    """Модель OCR: из app_settings (как extraction/clarification), иначе дефолт
+    конфига.
+
+    Раньше читался ТОЛЬКО конфиг, поэтому переключатель «Модель OCR сканов»
+    в админке сохранялся в базу, но ни на что не влиял: распознавание молча
+    шло самой дорогой моделью из дефолта.
+    """
+    from app.config import settings
+    try:
+        from app.database import SessionLocal
+        from app.models import AppSetting
+        db = SessionLocal()
+        try:
+            rec = db.query(AppSetting).filter(AppSetting.key == "ocr_model").first()
+            return (rec.value if rec else "") or settings.ocr_model
+        finally:
+            db.close()
+    except Exception:  # нет БД/таблицы — не ронять парсинг
+        logger.warning("OCR-модель из app_settings не прочитана, беру конфиг")
+        return settings.ocr_model
 
 
 def _parse_pdf_vision(path: str) -> str:
@@ -47,6 +71,7 @@ def _parse_pdf_vision(path: str) -> str:
     from pdf2image import convert_from_path
     from app.config import settings
 
+    model = _ocr_model()
     images = convert_from_path(path, dpi=150, fmt="jpeg")
     texts = []
 
@@ -64,7 +89,7 @@ def _parse_pdf_vision(path: str) -> str:
                     "X-Title": "IB PIR Calculator",
                 },
                 json={
-                    "model": settings.ocr_model,
+                    "model": model,
                     "max_tokens": 4096,
                     "temperature": 0,
                     "messages": [{
